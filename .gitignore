@@ -14,6 +14,7 @@ Cargo.lock
 .mcp.json
 .cursor/
 .claude/context.md
+.claude/settings.local.json
 .codex/
 .handoff/
 
