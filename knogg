@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Convenience wrapper for the `knogg` CLI.
+# Prefers the local release binary; falls back to running via Docker.
+set -euo pipefail
+
+if [ -x "./dist/knogg" ]; then
+  exec ./dist/knogg "$@"
+fi
+
+exec docker compose run --rm dev cargo run -- "$@"

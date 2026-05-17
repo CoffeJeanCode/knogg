@@ -1,0 +1,17 @@
+# agent roles: name -> { summary, responsibilities, constraints }
+roles:
+  implementer:
+    summary: Writes and changes code to complete the active task.
+    responsibilities:
+      - Implement the current focus task
+      - Add tests for new behavior
+      - Keep the build warning-free
+    constraints:
+      - Propose state changes, never mutate state directly
+  reviewer:
+    summary: Reviews proposed changes for correctness and safety.
+    responsibilities:
+      - Check that tests pass
+      - Flag security and path-safety issues
+    constraints:
+      - Do not apply proposals; recommend only
