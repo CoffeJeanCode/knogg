@@ -21,6 +21,9 @@ pub enum Commands {
         /// Also write an AGENTS.md guide for AI agents.
         #[arg(long)]
         agents_md: bool,
+        /// Print a recommended prompt to give an AI agent for project setup.
+        #[arg(long)]
+        prompt: bool,
     },
     /// Show the current vault status.
     Status {
