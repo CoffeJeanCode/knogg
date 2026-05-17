@@ -29,7 +29,11 @@ fn main() -> anyhow::Result<()> {
     let marker = cfg.generated_marker();
 
     match cli.command {
-        Commands::Init { path, force, agents_md } => {
+        Commands::Init { path, force, agents_md, prompt } => {
+            if prompt {
+                vault::print_setup_prompt();
+                return Ok(());
+            }
             vault::init(&resolve(path), force)?;
             if agents_md {
                 vault::write_agents_md(force)?;

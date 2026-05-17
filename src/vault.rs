@@ -237,6 +237,79 @@ pub fn write_agents_md(force: bool) -> Result<()> {
     Ok(())
 }
 
+/// Recommended prompt printed by `knogg init --prompt` to give an AI agent
+/// for project setup and knogg configuration.
+const SETUP_PROMPT: &str = r#"You are setting up a new project with knogg (agent context broker).
+Follow these steps in order. Stop after each step and wait for my confirmation.
+
+## Step 1 — Project brief
+
+Read the existing project docs (README.md, any plan/ spec files). Then:
+1. Set the project name: `knogg state set --stage "Stage 0" --task "Project bootstrap" --status in_progress`
+2. Add 3–5 high-level constraints based on the project (tech stack, rules, boundaries).
+3. Add the first 3–5 next actions (concrete, actionable items).
+4. Record any early decisions: `knogg decision add --title "..." --reason "..." --status accepted`
+
+## Step 2 — Architecture & style
+
+Populate the vault core files:
+- `core/index.yml` — list key source directories and their purpose.
+- `core/architecture.yml` — list main components/modules and how they connect.
+- `core/style_guides.yml` — coding conventions, naming, formatting rules.
+
+## Step 3 — Master plan
+
+Write `plans/master_plan.yml` with staged milestones:
+```yaml
+stages:
+  - name: Stage 0 — Bootstrap
+    goal: ...
+    tasks: [...]
+    status: in_progress
+  - name: Stage 1 — ...
+    goal: ...
+    tasks: [...]
+    status: todo
+```
+
+## Step 4 — Tool registry
+
+Review `plans/tool_registry.yml`. Add or remove template→output mappings
+for the agents actually used in this project. Remove entries for agents
+that won't be used.
+
+## Step 5 — Agent registry & roles
+
+Review `plans/agent_registry.yml` and `plans/roles.yml`:
+- Enable only the agents you'll use.
+- Define roles (e.g. "backend-dev", "reviewer", "test-writer") with
+  responsibilities and constraints.
+- Assign roles: `knogg agents set-role <agent> <role>`
+
+## Step 6 — AGENTS.md
+
+Run `knogg init --agents-md --force` to write the agent guide at the
+project root. Then customize it:
+- Add project-specific commands (test, lint, build commands).
+- Add the "Structure" section showing the project's directory layout.
+- Add the "Standards" section with project conventions.
+
+## Step 7 — Sync & verify
+
+1. Run `knogg sync --dry-run` to preview generated files.
+2. Run `knogg sync --force` to write them.
+3. Run `knogg doctor` and `knogg agents doctor` to verify.
+4. Run `knogg brief show` to see the generated project brief.
+
+When done, update status: `knogg state set --status done` and add the
+next milestone as in_progress.
+"#;
+
+/// `knogg init --prompt`: print the recommended setup prompt.
+pub fn print_setup_prompt() {
+    println!("{SETUP_PROMPT}");
+}
+
 /// `knogg status`: read and print the active context.
 pub fn status(path: &str) -> Result<()> {
     let root = resolve_path(path)?;
