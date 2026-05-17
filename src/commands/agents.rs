@@ -12,65 +12,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
-use crate::vault::resolve_path;
-use crate::vaultio::{atomic_write, backup_file, timestamp, VaultLock};
-
-/// Default `plans/agent_registry.yml`, written by `knogg init`.
-pub const DEFAULT_REGISTRY: &str = r#"version: 1
-workspace:
-  name: knogg
-  scope: project
-defaults:
-  generated_marker: "<!-- generated-by: knogg -->"
-  protect_human_files: true
-  default_mcp_server: knogg
-mcp_servers:
-  knogg:
-    enabled: true
-    transport: stdio
-    command: ./knogg
-    args:
-      - mcp
-    env: {}
-    description: Local knogg MCP server
-agents:
-  cursor:
-    enabled: true
-    kind: cursor
-    role: implementer
-    outputs:
-      mcp_config: .cursor/mcp.json
-      instructions: .cursorrules
-    mcp_servers:
-      - knogg
-  claude:
-    enabled: true
-    kind: claude_code
-    role: reviewer
-    outputs:
-      mcp_config: .mcp.json
-      instructions: .claude/context.md
-    mcp_servers:
-      - knogg
-  codex:
-    enabled: true
-    kind: codex
-    role: implementer
-    outputs:
-      mcp_config: .codex/config.toml
-      instructions: AGENTS.md
-    mcp_servers:
-      - knogg
-  opencode:
-    enabled: true
-    kind: opencode
-    role: implementer
-    outputs:
-      mcp_config: opencode.json
-      instructions: AGENTS.md
-    mcp_servers:
-      - knogg
-"#;
+use crate::core::vault::resolve_path;
+use crate::core::vaultio::{atomic_write, backup_file, timestamp, VaultLock};
 
 /// Agent kinds with a renderer.
 const SUPPORTED_KINDS: [&str; 4] = ["cursor", "claude_code", "codex", "opencode"];
@@ -462,7 +405,7 @@ pub fn agent_role(root: &Path, agent: &str) -> Result<String> {
 
 /// Assign a role (must exist in `plans/roles.yml`) to an agent.
 pub fn set_agent_role(root: &Path, agent: &str, role: &str) -> Result<()> {
-    if crate::roles::get(root, role).is_err() {
+    if crate::commands::roles::get(root, role).is_err() {
         bail!("unknown role '{role}' (see `knogg role list`)");
     }
     let _lock = VaultLock::acquire(root)?;
@@ -876,7 +819,7 @@ pub fn set_agent_mcp(path: &str, agent: &str, server: &str, enabled: bool) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_root(label: &str) -> PathBuf {
@@ -899,7 +842,7 @@ mod tests {
 
     #[test]
     fn default_registry_parses() {
-        let reg: AgentRegistry = serde_yaml::from_str(DEFAULT_REGISTRY).unwrap();
+        let reg: AgentRegistry = serde_yaml::from_str(crate::core::vault::DEFAULT_REGISTRY).unwrap();
         assert_eq!(reg.version, 1);
         assert!(reg.mcp_servers.contains_key("knogg"));
         for a in ["cursor", "claude", "codex", "opencode"] {
@@ -917,7 +860,7 @@ mod tests {
 
     #[test]
     fn renderers_emit_expected_formats() {
-        let reg: AgentRegistry = serde_yaml::from_str(DEFAULT_REGISTRY).unwrap();
+        let reg: AgentRegistry = serde_yaml::from_str(crate::core::vault::DEFAULT_REGISTRY).unwrap();
         let cursor = render_agent_config(&reg, &reg.agents["cursor"]).unwrap();
         assert!(cursor.contains("\"mcpServers\""));
         // JSON configs carry no marker key (would break schema validation).

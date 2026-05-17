@@ -6,8 +6,8 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::vault::resolve_path;
-use crate::vaultio::{atomic_write, VaultLock};
+use crate::core::vault::resolve_path;
+use crate::core::vaultio::{atomic_write, VaultLock};
 
 /// Valid decision statuses.
 pub const ALLOWED_DECISION_STATUS: [&str; 4] =
@@ -54,7 +54,7 @@ pub fn add_entry(
     let id = next_id(&log);
     log.decisions.push(Decision {
         id: id.clone(),
-        date: crate::vaultio::today(),
+        date: crate::core::vaultio::today(),
         title: title.to_string(),
         status: status.to_string(),
         scope: scope.to_string(),
@@ -119,7 +119,7 @@ fn next_id(log: &DecisionLog) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 

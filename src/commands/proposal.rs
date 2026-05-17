@@ -11,9 +11,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use crate::mcp::{apply_patch, audit_patch, safe_vault_path};
-use crate::vault::resolve_path;
-use crate::vaultio::{atomic_write, today, VaultLock};
+use crate::core::vault::{apply_patch, audit_patch, resolve_path, safe_vault_path};
+use crate::core::vaultio::{atomic_write, today, VaultLock};
 
 const PENDING: &str = "pending";
 const APPLIED: &str = "applied";
@@ -190,7 +189,7 @@ pub fn cmd_apply(path: &str, id: &str) -> Result<()> {
     apply(&root, id)?;
     println!("applied {id}");
     // F6: after_proposal_apply hooks (lock already released by `apply`).
-    if let Err(e) = crate::hooks::run(&root, "after_proposal_apply") {
+    if let Err(e) = crate::commands::hooks::run(&root, "after_proposal_apply") {
         eprintln!("hook warning: {e}");
     }
     Ok(())
@@ -206,7 +205,7 @@ pub fn cmd_reject(path: &str, id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -257,7 +256,7 @@ mod tests {
         .unwrap();
 
         apply(&root, &id).unwrap();
-        let ctx = crate::vault::read_active_context(&root).unwrap();
+        let ctx = crate::core::vault::read_active_context(&root).unwrap();
         assert_eq!(ctx.focus.status, "blocked");
         assert_eq!(load(&root, &id).unwrap().status, "applied");
 

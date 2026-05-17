@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::vaultio::{atomic_write, today, VaultLock};
+use crate::core::vaultio::{atomic_write, today, VaultLock};
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct MessageLog {
@@ -68,7 +68,7 @@ pub fn recent_json(root: &Path, limit: Option<usize>) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::vault::resolve_path;
+use crate::core::vault::resolve_path;
 
 /// Required directories in a healthy vault.
 const REQUIRED_DIRS: [&str; 4] = ["core", "state", "plans", "adapters"];
@@ -216,7 +216,7 @@ pub fn doctor(path: &str, marker: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::{init, MARKER};
+    use crate::core::vault::{init, MARKER};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -5,8 +5,8 @@ use std::time::Duration;
 use anyhow::{bail, Result};
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 
-use crate::sync::sync;
-use crate::vault::resolve_path;
+use crate::commands::sync::sync;
+use crate::core::vault::resolve_path;
 
 /// Quiet period before a burst of events triggers a sync (within 300-500ms).
 const DEBOUNCE: Duration = Duration::from_millis(400);
@@ -82,7 +82,7 @@ pub fn watch(path: &str, marker: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_root(label: &str) -> PathBuf {
@@ -124,12 +124,12 @@ mod tests {
     fn watch_errors_when_state_file_missing() {
         let root = temp_root("missing");
         // No init -> no state/active_context.yml.
-        assert!(watch(root.to_str().unwrap(), crate::vault::MARKER).is_err());
+        assert!(watch(root.to_str().unwrap(), crate::core::vault::MARKER).is_err());
     }
 
     #[test]
     fn watch_rejects_path_traversal() {
-        assert!(watch("../escape/.knogg", crate::vault::MARKER).is_err());
+        assert!(watch("../escape/.knogg", crate::core::vault::MARKER).is_err());
     }
 
     #[test]

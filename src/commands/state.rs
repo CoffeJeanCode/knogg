@@ -4,13 +4,13 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 
-use crate::mcp::ALLOWED_STATUS;
-use crate::vault::{read_active_context, resolve_path, write_active_context};
-use crate::vaultio::VaultLock;
+use crate::core::vault::ALLOWED_STATUS;
+use crate::core::vault::{read_active_context, resolve_path, write_active_context};
+use crate::core::vaultio::VaultLock;
 
 /// F6: run `after_state_change` hooks (lock already released).
 fn after_state_change(root: &Path) {
-    if let Err(e) = crate::hooks::run(root, "after_state_change") {
+    if let Err(e) = crate::commands::hooks::run(root, "after_state_change") {
         eprintln!("hook warning: {e}");
     }
 }
@@ -87,7 +87,7 @@ pub fn clear_next(path: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 

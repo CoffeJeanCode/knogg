@@ -3,13 +3,185 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
-use crate::vaultio::{atomic_write, backup_file, timestamp, VaultLock};
+use crate::core::vaultio::{atomic_write, backup_file, timestamp, VaultLock};
 
 /// Marker prepended to vault-generated files so they may be safely overwritten.
 pub const MARKER: &str = "<!-- generated-by: knogg -->";
 
-/// View of `state/active_context.yml`.
+/// Valid values for `focus.status`.
+pub const ALLOWED_STATUS: [&str; 4] = ["todo", "in_progress", "blocked", "done"];
+
+/// Default `plans/agent_registry.yml`, written by `knogg init`.
+pub const DEFAULT_REGISTRY: &str = r#"version: 1
+workspace:
+  name: knogg
+  scope: project
+defaults:
+  generated_marker: "<!-- generated-by: knogg -->"
+  protect_human_files: true
+  default_mcp_server: knogg
+mcp_servers:
+  knogg:
+    enabled: true
+    transport: stdio
+    command: ./knogg
+    args:
+      - mcp
+    env: {}
+    description: Local knogg MCP server
+agents:
+  cursor:
+    enabled: true
+    kind: cursor
+    role: implementer
+    outputs:
+      mcp_config: .cursor/mcp.json
+      instructions: .cursorrules
+    mcp_servers:
+      - knogg
+  claude:
+    enabled: true
+    kind: claude_code
+    role: reviewer
+    outputs:
+      mcp_config: .mcp.json
+      instructions: .claude/context.md
+    mcp_servers:
+      - knogg
+  codex:
+    enabled: true
+    kind: codex
+    role: implementer
+    outputs:
+      mcp_config: .codex/config.toml
+      instructions: AGENTS.md
+    mcp_servers:
+      - knogg
+  opencode:
+    enabled: true
+    kind: opencode
+    role: implementer
+    outputs:
+      mcp_config: opencode.json
+      instructions: AGENTS.md
+    mcp_servers:
+      - knogg
+"#;
+
+/// Default `plans/roles.yml`, written by `knogg init`.
+pub const DEFAULT_ROLES: &str = r#"# agent roles: name -> { summary, responsibilities, constraints }
+roles:
+  implementer:
+    summary: Writes and changes code to complete the active task.
+    responsibilities:
+      - Implement the current focus task
+      - Add tests for new behavior
+      - Keep the build warning-free
+    constraints:
+      - Propose state changes, never mutate state directly
+  reviewer:
+    summary: Reviews proposed changes for correctness and safety.
+    responsibilities:
+      - Check that tests pass
+      - Flag security and path-safety issues
+    constraints:
+      - Do not apply proposals; recommend only
+"#;
+
+/// Default `plans/hooks.yml`, written by `knogg init`.
+pub const DEFAULT_HOOKS: &str = r#"# event hooks: event -> { enabled, actions }
+hooks:
+  before_handoff:
+    enabled: true
+    actions:
+      - refresh_brief
+  after_state_change:
+    enabled: true
+    actions:
+      - refresh_brief
+      - sync
+  after_proposal_apply:
+    enabled: true
+    actions:
+      - refresh_brief
+      - sync
+  before_mcp_response:
+    enabled: true
+    actions:
+      - ensure_brief_fresh
+"#;
+
+// ---- shared MCP helpers ----------------------------------------------------
+
+/// Resolve a vault-relative target, rejecting traversal and absolute paths.
+pub fn safe_vault_path(root: &Path, target: &str) -> Result<PathBuf> {
+    let p = Path::new(target);
+    if p.is_absolute() {
+        bail!("absolute paths are not allowed: {target}");
+    }
+    if target.split(['/', '\\']).any(|c| c == ".." || c == "~") {
+        bail!("path traversal is not allowed: {target}");
+    }
+    let joined = root.join(p);
+    if !joined.starts_with(root) {
+        bail!("path escapes the vault: {target}");
+    }
+    Ok(joined)
+}
+
+/// Validate a patch. Currently: `focus.status` must be an allowed value.
+pub fn audit_patch(patch: &JsonValue) -> Result<()> {
+    if let Some(status) = patch.pointer("/focus/status") {
+        let s = status
+            .as_str()
+            .ok_or_else(|| anyhow!("focus.status must be a string"))?;
+        if !ALLOWED_STATUS.contains(&s) {
+            bail!(
+                "invalid focus.status '{s}' (allowed: {})",
+                ALLOWED_STATUS.join(", ")
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Deep-merge `patch` into the YAML file at `target` and write it back.
+pub fn apply_patch(root: &Path, target: &str, patch: &JsonValue) -> Result<()> {
+    let path = safe_vault_path(root, target)?;
+    let raw = fs::read_to_string(&path)
+        .map_err(|e| anyhow!("reading {}: {e}", path.display()))?;
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(&raw)
+        .map_err(|e| anyhow!("parsing {}: {e}", path.display()))?;
+
+    let patch_yaml: serde_yaml::Value = serde_yaml::to_value(patch)
+        .map_err(|e| anyhow!("converting patch: {e}"))?;
+    merge_yaml(&mut doc, &patch_yaml);
+
+    let out = serde_yaml::to_string(&doc).map_err(|e| anyhow!("serializing patched doc: {e}"))?;
+    atomic_write(&path, out.as_bytes())?;
+    Ok(())
+}
+
+/// Recursively merge `patch` into `base` (mappings deep-merge, scalars replace).
+fn merge_yaml(base: &mut serde_yaml::Value, patch: &serde_yaml::Value) {
+    match (base, patch) {
+        (serde_yaml::Value::Mapping(b), serde_yaml::Value::Mapping(p)) => {
+            for (k, v) in p {
+                match b.get_mut(k) {
+                    Some(existing) => merge_yaml(existing, v),
+                    None => {
+                        b.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        (b, p) => *b = p.clone(),
+    }
+}
+
+// ---- active context model --------------------------------------------------
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActiveContext {
     pub project: Project,
@@ -101,15 +273,15 @@ fn vault_files() -> Vec<(&'static str, String)> {
         ),
         (
             "plans/agent_registry.yml",
-            crate::agents::DEFAULT_REGISTRY.to_string(),
+            DEFAULT_REGISTRY.to_string(),
         ),
         (
             "plans/roles.yml",
-            crate::roles::DEFAULT_ROLES.to_string(),
+            DEFAULT_ROLES.to_string(),
         ),
         (
             "plans/hooks.yml",
-            crate::hooks::DEFAULT_HOOKS.to_string(),
+            DEFAULT_HOOKS.to_string(),
         ),
         (
             "adapters/cursor_prompt.md",
