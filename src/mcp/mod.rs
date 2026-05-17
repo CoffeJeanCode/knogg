@@ -1,15 +1,11 @@
 use std::fs;
 use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 
-use crate::vault::resolve_path;
-use crate::vaultio::atomic_write;
-
-/// Valid values for `focus.status`.
-pub const ALLOWED_STATUS: [&str; 4] = ["todo", "in_progress", "blocked", "done"];
+use crate::core::vault::{audit_patch, resolve_path, safe_vault_path};
 
 /// MCP protocol version this server speaks.
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -53,7 +49,7 @@ fn dispatch_line(root: &Path, line: &str) -> Option<String> {
 
     // F6: before_mcp_response hooks (e.g. ensure the brief is fresh).
     // Warnings go to stderr only — stdout carries JSON-RPC.
-    if let Err(e) = crate::hooks::run(root, "before_mcp_response") {
+    if let Err(e) = crate::commands::hooks::run(root, "before_mcp_response") {
         eprintln!("hook warning: {e}");
     }
 
@@ -226,7 +222,7 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             // Soft audit: report issues but still stage the proposal.
             let audit = audit_patch(&patch);
             // Staged only — never mutates active_context.yml directly.
-            let id = crate::proposal::create(root, target, &patch, reason)?;
+            let id = crate::commands::proposal::create(root, target, &patch, reason)?;
             Ok(json!({
                 "proposal_id": id,
                 "status": "pending",
@@ -237,30 +233,30 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
         "audit_commit" => {
             // Apply a staged proposal by id (re-audits before applying).
             let id = str_param(params, "id")?;
-            crate::proposal::apply(root, id)?;
+            crate::commands::proposal::apply(root, id)?;
             // Keep the brief fresh silently (no stdout — JSON-RPC channel).
-            let _ = crate::brief::refresh(root);
+            let _ = crate::commands::brief::refresh(root);
             Ok(json!({"committed": true, "proposal_id": id}))
         }
         "get_brief" => {
-            let brief = crate::brief::load_or_refresh(root)?;
+            let brief = crate::commands::brief::load_or_refresh(root)?;
             serde_json::to_value(&brief).map_err(|e| anyhow!("serializing brief: {e}"))
         }
         "get_next_actions" => {
-            let brief = crate::brief::load_or_refresh(root)?;
+            let brief = crate::commands::brief::load_or_refresh(root)?;
             Ok(json!({ "next_actions": brief.next_actions }))
         }
         "get_allowed_scope" => {
-            let brief = crate::brief::load_or_refresh(root)?;
+            let brief = crate::commands::brief::load_or_refresh(root)?;
             Ok(json!({"scope": "project", "constraints": brief.constraints}))
         }
         "get_current_decisions" => {
-            let brief = crate::brief::load_or_refresh(root)?;
+            let brief = crate::commands::brief::load_or_refresh(root)?;
             Ok(json!({ "decisions": brief.recent_decisions }))
         }
         "get_agent_handoff" => {
             let agent = str_param(params, "agent")?;
-            let prompt = crate::handoff::render(root, agent)?;
+            let prompt = crate::commands::handoff::render(root, agent)?;
             Ok(json!({"agent": agent, "prompt": prompt}))
         }
         "search_vault" => {
@@ -268,7 +264,7 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             search_vault(root, query)
         }
         "list_proposals" => {
-            let items: Vec<Value> = crate::proposal::all(root)?
+            let items: Vec<Value> = crate::commands::proposal::all(root)?
                 .into_iter()
                 .map(|p| {
                     json!({"id": p.id, "status": p.status,
@@ -288,13 +284,13 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
                 .get("scope")
                 .and_then(Value::as_str)
                 .unwrap_or("global");
-            let id = crate::decision::add_entry(root, title, reason, status, scope)?;
+            let id = crate::commands::decision::add_entry(root, title, reason, status, scope)?;
             Ok(json!({"decision_id": id, "status": status}))
         }
         "post_message" => {
             let from = str_param(params, "from")?;
             let text = str_param(params, "text")?;
-            let id = crate::messages::post(root, from, text)?;
+            let id = crate::commands::messages::post(root, from, text)?;
             Ok(json!({"message_id": id}))
         }
         "get_messages" => {
@@ -302,30 +298,30 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
                 .get("limit")
                 .and_then(Value::as_u64)
                 .map(|n| n as usize);
-            crate::messages::recent_json(root, limit)
+            crate::commands::messages::recent_json(root, limit)
         }
-        "list_roles" => crate::roles::all_json(root),
+        "list_roles" => crate::commands::roles::all_json(root),
         "get_role" => {
             let name = str_param(params, "name")?;
-            crate::roles::role_json(root, name)
+            crate::commands::roles::role_json(root, name)
         }
         "set_role" => {
             let name = str_param(params, "name")?;
             let summary = str_param(params, "summary")?;
             let resp = str_vec(params, "responsibilities");
             let constr = str_vec(params, "constraints");
-            crate::roles::set_entry(root, name, summary, resp, constr)?;
+            crate::commands::roles::set_entry(root, name, summary, resp, constr)?;
             Ok(json!({"role": name, "set": true}))
         }
         "get_agent_role" => {
             let agent = str_param(params, "agent")?;
-            let role_name = crate::agents::agent_role(root, agent)?;
-            crate::roles::role_json(root, &role_name)
+            let role_name = crate::commands::agents::agent_role(root, agent)?;
+            crate::commands::roles::role_json(root, &role_name)
         }
         "set_agent_role" => {
             let agent = str_param(params, "agent")?;
             let role = str_param(params, "role")?;
-            crate::agents::set_agent_role(root, agent, role)?;
+            crate::commands::agents::set_agent_role(root, agent, role)?;
             Ok(json!({"agent": agent, "role": role}))
         }
         other => bail!("unknown method '{other}'"),
@@ -346,23 +342,6 @@ fn str_vec(params: &Value, key: &str) -> Vec<String> {
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default()
-}
-
-/// Resolve a vault-relative target, rejecting traversal and absolute paths.
-pub fn safe_vault_path(root: &Path, target: &str) -> Result<PathBuf> {
-    let p = Path::new(target);
-    if p.is_absolute() {
-        bail!("absolute paths are not allowed: {target}");
-    }
-    if target.split(['/', '\\']).any(|c| c == ".." || c == "~") {
-        bail!("path traversal is not allowed: {target}");
-    }
-    let joined = root.join(p);
-    // Lexical containment check: every component must stay within the root.
-    if !joined.starts_with(root) {
-        bail!("path escapes the vault: {target}");
-    }
-    Ok(joined)
 }
 
 /// `read_vault`: read a YAML file inside the vault and return it as JSON.
@@ -442,62 +421,11 @@ pub fn search_vault(root: &Path, query: &str) -> Result<Value> {
     Ok(json!({ "query": query, "matches": matches }))
 }
 
-/// Validate a patch. Currently: `focus.status` must be an allowed value.
-pub fn audit_patch(patch: &Value) -> Result<()> {
-    if let Some(status) = patch.pointer("/focus/status") {
-        let s = status
-            .as_str()
-            .ok_or_else(|| anyhow!("focus.status must be a string"))?;
-        if !ALLOWED_STATUS.contains(&s) {
-            bail!(
-                "invalid focus.status '{s}' (allowed: {})",
-                ALLOWED_STATUS.join(", ")
-            );
-        }
-    }
-    Ok(())
-}
-
-/// Deep-merge `patch` into the YAML file at `target` and write it back.
-///
-/// Lock-free: callers (e.g. `proposal::apply`) must hold the vault lock.
-pub fn apply_patch(root: &Path, target: &str, patch: &Value) -> Result<()> {
-    let path = safe_vault_path(root, target)?;
-    let raw = fs::read_to_string(&path)
-        .map_err(|e| anyhow!("reading {}: {e}", path.display()))?;
-    let mut doc: serde_yaml::Value = serde_yaml::from_str(&raw)
-        .map_err(|e| anyhow!("parsing {}: {e}", path.display()))?;
-
-    let patch_yaml: serde_yaml::Value = serde_yaml::to_value(patch)
-        .map_err(|e| anyhow!("converting patch: {e}"))?;
-    merge_yaml(&mut doc, &patch_yaml);
-
-    let out = serde_yaml::to_string(&doc).map_err(|e| anyhow!("serializing patched doc: {e}"))?;
-    atomic_write(&path, out.as_bytes())?;
-    Ok(())
-}
-
-/// Recursively merge `patch` into `base` (mappings deep-merge, scalars replace).
-fn merge_yaml(base: &mut serde_yaml::Value, patch: &serde_yaml::Value) {
-    match (base, patch) {
-        (serde_yaml::Value::Mapping(b), serde_yaml::Value::Mapping(p)) => {
-            for (k, v) in p {
-                match b.get_mut(k) {
-                    Some(existing) => merge_yaml(existing, v),
-                    None => {
-                        b.insert(k.clone(), v.clone());
-                    }
-                }
-            }
-        }
-        (b, p) => *b = p.clone(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use std::path::PathBuf;
+    use crate::core::vault::init;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_root(label: &str) -> PathBuf {
@@ -519,6 +447,7 @@ mod tests {
 
     #[test]
     fn audit_blocks_invalid_status() {
+        use crate::core::vault::ALLOWED_STATUS;
         let bad = json!({"focus": {"status": "WRONG"}});
         assert!(audit_patch(&bad).is_err());
         for s in ALLOWED_STATUS {
@@ -538,6 +467,7 @@ mod tests {
 
     #[test]
     fn valid_patch_applies_invalid_blocks() {
+        use crate::core::vault::apply_patch;
         let root = temp_root("apply");
         init(root.to_str().unwrap(), false).unwrap();
         let target = "state/active_context.yml";
@@ -571,7 +501,7 @@ mod tests {
     fn list_vault_hides_backups_and_proposals_by_default() {
         let root = temp_root("listvault");
         init(root.to_str().unwrap(), false).unwrap();
-        crate::proposal::create(
+        crate::commands::proposal::create(
             &root,
             "state/active_context.yml",
             &json!({"focus": {"status": "done"}}),

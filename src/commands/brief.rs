@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::decision::{self, DecisionSummary};
-use crate::vault::{read_active_context, Focus};
-use crate::vaultio::{atomic_write, today, VaultLock};
+use crate::commands::decision::{self, DecisionSummary};
+use crate::core::vault::{read_active_context, Focus};
+use crate::core::vaultio::{atomic_write, today, VaultLock};
 
 /// Recent decisions kept in the brief (never the full log).
 const MAX_DECISIONS: usize = 5;
@@ -89,14 +89,14 @@ pub fn ensure_fresh(root: &Path) -> Result<()> {
 // ---- CLI wrappers ----------------------------------------------------------
 
 pub fn cmd_refresh(path: &str) -> Result<()> {
-    let root = crate::vault::resolve_path(path)?;
+    let root = crate::core::vault::resolve_path(path)?;
     refresh(&root)?;
     println!("brief refreshed");
     Ok(())
 }
 
 pub fn cmd_show(path: &str) -> Result<()> {
-    let root = crate::vault::resolve_path(path)?;
+    let root = crate::core::vault::resolve_path(path)?;
     let brief = load_or_refresh(&root)?;
     let yaml = serde_yaml::to_string(&brief).map_err(|e| anyhow!("rendering brief: {e}"))?;
     print!("{yaml}");
@@ -104,7 +104,7 @@ pub fn cmd_show(path: &str) -> Result<()> {
 }
 
 pub fn cmd_doctor(path: &str) -> Result<()> {
-    let root = crate::vault::resolve_path(path)?;
+    let root = crate::core::vault::resolve_path(path)?;
     println!("brief doctor\n");
     match load(&root) {
         Ok(Some(b)) if !b.generated_at.is_empty() => {
@@ -133,7 +133,7 @@ pub fn cmd_doctor(path: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_root(label: &str) -> PathBuf {

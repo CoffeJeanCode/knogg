@@ -5,8 +5,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use minijinja::Environment;
 use serde_json::{json, Value};
 
-use crate::vault::resolve_path;
-use crate::vaultio::{atomic_write, VaultLock};
+use crate::core::vault::resolve_path;
+use crate::core::vaultio::{atomic_write, VaultLock};
 
 /// Map a CLI agent name to its adapter file (relative to the vault root).
 fn adapter_for(agent: &str) -> Result<&'static str> {
@@ -32,8 +32,8 @@ pub fn render(root: &Path, agent: &str) -> Result<String> {
     })?;
 
     // Read the compact brief, not the whole vault.
-    let brief = crate::brief::load_or_refresh(root)?;
-    let profile = crate::agents::agent_profile(root, agent);
+    let brief = crate::commands::brief::load_or_refresh(root)?;
+    let profile = crate::commands::agents::agent_profile(root, agent);
     let ctx = brief_context(&brief, profile.as_ref());
 
     let mut env = Environment::new();
@@ -45,7 +45,7 @@ pub fn render(root: &Path, agent: &str) -> Result<String> {
 }
 
 /// Build the minijinja context from the brief, trimmed by the agent profile.
-fn brief_context(brief: &crate::brief::Brief, profile: Option<&crate::agents::AgentProfile>) -> Value {
+fn brief_context(brief: &crate::commands::brief::Brief, profile: Option<&crate::commands::agents::AgentProfile>) -> Value {
     let mut next_actions = brief.next_actions.clone();
     let mut decisions = brief.recent_decisions.clone();
     if let Some(p) = profile {
@@ -73,7 +73,7 @@ fn brief_context(brief: &crate::brief::Brief, profile: Option<&crate::agents::Ag
 pub fn handoff(agent: &str, path: &str, print: bool, save: Option<&str>) -> Result<()> {
     let root = resolve_path(path)?;
     // F6: before_handoff hooks (e.g. refresh the brief).
-    if let Err(e) = crate::hooks::run(&root, "before_handoff") {
+    if let Err(e) = crate::commands::hooks::run(&root, "before_handoff") {
         eprintln!("hook warning: {e}");
     }
     let rendered = render(&root, agent)?;
@@ -119,7 +119,7 @@ fn emit(rendered: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 

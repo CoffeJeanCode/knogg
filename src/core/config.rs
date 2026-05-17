@@ -31,7 +31,7 @@ impl Config {
         self.knogg
             .generated_marker
             .clone()
-            .unwrap_or_else(|| crate::vault::MARKER.to_string())
+            .unwrap_or_else(|| crate::core::vault::MARKER.to_string())
     }
 }
 
@@ -115,7 +115,7 @@ codex_output = "AGENTS.md"
     #[test]
     fn generated_marker_falls_back_to_default() {
         let cfg = config_with_path(None);
-        assert_eq!(cfg.generated_marker(), crate::vault::MARKER);
+        assert_eq!(cfg.generated_marker(), crate::core::vault::MARKER);
 
         let mut cfg = config_with_path(None);
         cfg.knogg.generated_marker = Some("<!-- custom -->".into());

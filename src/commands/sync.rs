@@ -5,8 +5,8 @@ use anyhow::{anyhow, Context, Result};
 use minijinja::Environment;
 use serde::Deserialize;
 
-use crate::vault::{read_active_context, resolve_path};
-use crate::vaultio::{atomic_write, backup_file, timestamp, VaultLock};
+use crate::core::vault::{read_active_context, resolve_path};
+use crate::core::vaultio::{atomic_write, backup_file, timestamp, VaultLock};
 
 /// `plans/tool_registry.yml`: template -> output mappings.
 #[derive(Debug, Deserialize)]
@@ -65,7 +65,7 @@ pub fn sync(path: &str, force: bool, marker: &str, dry_run: bool) -> Result<()> 
 fn sync_tool(
     root: &Path,
     tool: &ToolEntry,
-    ctx: &crate::vault::ActiveContext,
+    ctx: &crate::core::vault::ActiveContext,
     force: bool,
     marker: &str,
     dry_run: bool,
@@ -152,7 +152,7 @@ fn sync_tool(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::{init, MARKER};
+    use crate::core::vault::{init, MARKER};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 

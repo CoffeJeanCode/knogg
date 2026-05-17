@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::vault::resolve_path;
-use crate::vaultio::{atomic_write, VaultLock};
+use crate::core::vault::resolve_path;
+use crate::core::vaultio::{atomic_write, VaultLock};
 
 /// Lifecycle events that may carry hooks.
 pub const KNOWN_EVENTS: [&str; 4] = [
@@ -23,29 +23,6 @@ pub const KNOWN_EVENTS: [&str; 4] = [
 
 /// Actions a hook may run.
 const KNOWN_ACTIONS: [&str; 3] = ["refresh_brief", "sync", "ensure_brief_fresh"];
-
-/// Default `plans/hooks.yml`, written by `knogg init`.
-pub const DEFAULT_HOOKS: &str = r#"# event hooks: event -> { enabled, actions }
-hooks:
-  before_handoff:
-    enabled: true
-    actions:
-      - refresh_brief
-  after_state_change:
-    enabled: true
-    actions:
-      - refresh_brief
-      - sync
-  after_proposal_apply:
-    enabled: true
-    actions:
-      - refresh_brief
-      - sync
-  before_mcp_response:
-    enabled: true
-    actions:
-      - ensure_brief_fresh
-"#;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct HookSet {
@@ -101,15 +78,15 @@ pub fn run(root: &Path, event: &str) -> Result<()> {
 fn run_action(root: &Path, action: &str) -> Result<()> {
     match action {
         "refresh_brief" => {
-            crate::brief::refresh(root)?;
+            crate::commands::brief::refresh(root)?;
             Ok(())
         }
-        "ensure_brief_fresh" => crate::brief::ensure_fresh(root),
+        "ensure_brief_fresh" => crate::commands::brief::ensure_fresh(root),
         "sync" => {
             let path = root
                 .to_str()
                 .ok_or_else(|| anyhow!("non-UTF-8 vault path"))?;
-            crate::sync::sync(path, false, crate::vault::MARKER, false)
+            crate::commands::sync::sync(path, false, crate::core::vault::MARKER, false)
         }
         other => bail!("unknown hook action '{other}'"),
     }
@@ -192,7 +169,7 @@ pub fn cmd_set_enabled(path: &str, event: &str, enabled: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_root(label: &str) -> PathBuf {
@@ -205,7 +182,7 @@ mod tests {
 
     #[test]
     fn default_hooks_parse_and_run() {
-        let set: HookSet = serde_yaml::from_str(DEFAULT_HOOKS).unwrap();
+        let set: HookSet = serde_yaml::from_str(crate::core::vault::DEFAULT_HOOKS).unwrap();
         for e in KNOWN_EVENTS {
             assert!(set.hooks.contains_key(e), "missing event {e}");
         }

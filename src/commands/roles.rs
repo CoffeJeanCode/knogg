@@ -11,28 +11,8 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::vault::resolve_path;
-use crate::vaultio::{atomic_write, VaultLock};
-
-/// Default `plans/roles.yml`, written by `knogg init`.
-pub const DEFAULT_ROLES: &str = r#"# agent roles: name -> { summary, responsibilities, constraints }
-roles:
-  implementer:
-    summary: Writes and changes code to complete the active task.
-    responsibilities:
-      - Implement the current focus task
-      - Add tests for new behavior
-      - Keep the build warning-free
-    constraints:
-      - Propose state changes, never mutate state directly
-  reviewer:
-    summary: Reviews proposed changes for correctness and safety.
-    responsibilities:
-      - Check that tests pass
-      - Flag security and path-safety issues
-    constraints:
-      - Do not apply proposals; recommend only
-"#;
+use crate::core::vault::resolve_path;
+use crate::core::vaultio::{atomic_write, VaultLock};
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct RoleSet {
@@ -182,7 +162,7 @@ pub fn cmd_remove(path: &str, name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::init;
+    use crate::core::vault::init;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -196,7 +176,7 @@ mod tests {
 
     #[test]
     fn default_roles_parse_and_init_writes_them() {
-        let set: RoleSet = serde_yaml::from_str(DEFAULT_ROLES).unwrap();
+        let set: RoleSet = serde_yaml::from_str(crate::core::vault::DEFAULT_ROLES).unwrap();
         assert!(set.roles.contains_key("implementer"));
 
         let root = temp_root("init");
