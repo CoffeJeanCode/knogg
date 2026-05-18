@@ -411,8 +411,10 @@ pub fn write_agents_md(force: bool) -> Result<()> {
 
 /// Recommended prompt printed by `knogg init --prompt` to give an AI agent
 /// for project setup and knogg configuration.
-const SETUP_PROMPT: &str = r#"You are setting up a new project with knogg (agent context broker).
-Follow these steps in order. Stop after each step and wait for my confirmation.
+const SETUP_PROMPT: &str = r#"You are setting up AND building a project with knogg (agent context broker).
+Run this in ONE continuous execution — do NOT stop between steps. After each
+step run `knogg doctor` to verify. Pause only if a step needs project
+knowledge you cannot infer from the repo, or if a command fails twice.
 
 ## Step 1 — Project brief
 
@@ -473,8 +475,19 @@ project root. Then customize it:
 3. Run `knogg doctor` and `knogg agents doctor` to verify.
 4. Run `knogg brief show` to see the generated project brief.
 
-When done, update status: `knogg state set --status done` and add the
-next milestone as in_progress.
+## Step 8 — Build loop
+
+Setup is done — now execute the master plan. Loop until every stage in
+`plans/master_plan.yml` has `status: done`:
+1. `knogg brief show` — read the current focus and next actions.
+2. Pick the next `todo`/`in_progress` task in the active stage.
+3. Implement it; run the project's test and lint commands.
+4. `knogg state set` to advance the task; when all tasks in a stage are
+   done, set the stage `done` and move focus to the next stage.
+5. Repeat from step 1.
+
+Stop only when all stages are `done`, a command fails twice, or a task
+needs project judgement you cannot infer from the repo.
 "#;
 
 /// `knogg init --prompt`: print the recommended setup prompt.

@@ -48,5 +48,4 @@ fmt:
 fmt-check:
 	docker compose run --rm dev cargo fmt --check
 
-check:
-	docker compose run --rm dev cargo check
+check: fmt-check lint test

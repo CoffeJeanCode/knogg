@@ -9,7 +9,6 @@ use std::path::Path;
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 
 use crate::core::vault::resolve_path;
 use crate::core::vaultio::{atomic_write, VaultLock};
@@ -84,28 +83,6 @@ pub fn remove_entry(root: &Path, name: &str) -> Result<()> {
         bail!("unknown role '{name}'");
     }
     write(root, &set)
-}
-
-/// All roles as JSON: `{name, summary}` entries.
-pub fn all_json(root: &Path) -> Result<Value> {
-    let set = load(root)?;
-    let items: Vec<Value> = set
-        .roles
-        .iter()
-        .map(|(n, r)| json!({"name": n, "summary": r.summary}))
-        .collect();
-    Ok(json!({ "roles": items }))
-}
-
-/// One role as JSON, including responsibilities and constraints.
-pub fn role_json(root: &Path, name: &str) -> Result<Value> {
-    let r = get(root, name)?;
-    Ok(json!({
-        "name": name,
-        "summary": r.summary,
-        "responsibilities": r.responsibilities,
-        "constraints": r.constraints,
-    }))
 }
 
 // ---- CLI wrappers ----------------------------------------------------------

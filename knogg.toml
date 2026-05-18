@@ -7,6 +7,9 @@ clipboard = false
 mcp_stdio = true
 watch = true
 
+[proposals]
+autoapply_low = true
+
 [agents]
 opencode_output = "AGENTS.md"
 cursor_output = ".cursorrules"

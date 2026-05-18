@@ -10,6 +10,5 @@ Status: in_progress
 
 ## Next Actions
 - Update billing page
-- Write tests
 
 ## Summary

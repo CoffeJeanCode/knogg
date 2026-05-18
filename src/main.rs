@@ -26,6 +26,12 @@ fn main() -> anyhow::Result<()> {
                 core::vault::write_agents_md(force)?;
             }
         }
+        Commands::Completions { shell } => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+        }
         Commands::Status { path } => {
             core::vault::status(&resolve(path))?;
         }

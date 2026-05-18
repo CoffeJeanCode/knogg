@@ -163,8 +163,106 @@ pub fn ack_many(root: &Path, ids: &[String], by: &str) -> Result<Vec<(String, Re
     Ok(results)
 }
 
+/// Close open messages older than `max_open_days` (ISO date on `at` field).
+pub fn expire_stale(root: &Path, max_open_days: u32) -> Result<usize> {
+    let cutoff = days_ago(max_open_days);
+    let _lock = VaultLock::acquire(root)?;
+    let mut log = load(root)?;
+    let mut n = 0usize;
+    for m in &mut log.messages {
+        if m.status == STATUS_OPEN && m.at.as_str() < cutoff.as_str() {
+            m.status = STATUS_CLOSED.to_string();
+            n += 1;
+        }
+    }
+    if n > 0 {
+        write_log(root, &log)?;
+    }
+    Ok(n)
+}
+
+fn days_ago(days: u32) -> String {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs()
+        .saturating_sub(u64::from(days) * 86_400);
+    let (y, m, d) = unix_day_to_ymd(t / 86_400);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn unix_day_to_ymd(mut days: u64) -> (u32, u32, u32) {
+    let mut y = 1970u32;
+    loop {
+        let diy = if is_leap(y) { 366 } else { 365 };
+        if days < diy {
+            break;
+        }
+        days -= diy;
+        y += 1;
+    }
+    let mut m = 1u32;
+    for md in month_days(y) {
+        if days < md {
+            break;
+        }
+        days -= md;
+        m += 1;
+    }
+    (y, m, (days + 1) as u32)
+}
+
+fn is_leap(y: u32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn month_days(y: u32) -> [u64; 12] {
+    [
+        31,
+        if is_leap(y) { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ]
+}
+
+/// Terse message rows for MCP inbox (`id`, `from`, `st`, `tx`).
+pub fn inbox_terse(root: &Path, agent: Option<&str>) -> Result<Value> {
+    expire_stale(root, 30)?;
+    let filter = MessageFilter {
+        status: Some(STATUS_OPEN.to_string()),
+        unread_for: agent.map(String::from),
+        limit: Some(20),
+        ..Default::default()
+    };
+    let log = load(root)?;
+    let msgs: Vec<Value> = log
+        .messages
+        .iter()
+        .filter(|m| matches_filter(m, &filter))
+        .map(|m| {
+            json!({
+                "id": m.id,
+                "from": m.from,
+                "st": m.status,
+                "tx": m.text,
+            })
+        })
+        .collect();
+    Ok(json!(msgs))
+}
+
 /// Filtered messages as JSON (`messages` array, newest last).
 pub fn filtered_json(root: &Path, filter: &MessageFilter) -> Result<Value> {
+    let _ = expire_stale(root, 30);
     let log = load(root)?;
     let mut out: Vec<&Message> = log.messages.iter().filter(|m| matches_filter(m, filter)).collect();
     if let Some(n) = filter.limit {

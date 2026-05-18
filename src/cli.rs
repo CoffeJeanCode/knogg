@@ -25,6 +25,11 @@ pub enum Commands {
         #[arg(long)]
         prompt: bool,
     },
+    /// Generate a shell completion script (bash, zsh, fish, powershell, elvish).
+    Completions {
+        /// Target shell.
+        shell: clap_complete::Shell,
+    },
     /// Show the current vault status.
     Status {
         /// Vault path (overrides knogg.toml; defaults to ./.knogg).

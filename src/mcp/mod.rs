@@ -83,21 +83,34 @@ fn tools_list() -> Value {
     };
     json!({"tools": [
         {"name": "get_active_context",
-         "description": "Return the active Vault context",
-         "inputSchema": obj(json!({}), json!([]))},
+         "description": "Consolidated context: focus, next_actions, decisions, scope, handoff, inbox (ADR-0010)",
+         "inputSchema": json!({"type": "object",
+            "properties": {"agent": {"type": "string"}},
+            "additionalProperties": false})},
         {"name": "read_vault",
-         "description": "Read a safe relative path from the Vault",
-         "inputSchema": obj(json!({"path": {"type": "string"}}), json!(["path"]))},
+         "description": "Read a vault file; optional 1-based line range",
+         "inputSchema": json!({"type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "start_line": {"type": "integer"},
+              "end_line": {"type": "integer"}
+            },
+            "required": ["path"],
+            "additionalProperties": false})},
         {"name": "list_vault",
          "description": "List safe Vault paths",
          "inputSchema": json!({"type": "object",
             "properties": {"include_proposals": {"type": "boolean"}},
             "additionalProperties": false})},
+        {"name": "search_vault",
+         "description": "Search vault files for a text query (case-insensitive)",
+         "inputSchema": obj(
+            json!({"query": {"type": "string"}}), json!(["query"]))},
         {"name": "get_tool_registry",
          "description": "Return the Vault tool registry",
          "inputSchema": obj(json!({}), json!([]))},
         {"name": "propose_state_update",
-         "description": "Create a staged proposal for a state update",
+         "description": "Stage or auto-apply a state update (risk-tiered, ADR-0011)",
          "inputSchema": obj(
             json!({"target": {"type": "string"},
                    "patch": {"type": "object"},
@@ -106,86 +119,21 @@ fn tools_list() -> Value {
         {"name": "audit_commit",
          "description": "Apply a staged proposal by id",
          "inputSchema": obj(json!({"id": {"type": "string"}}), json!(["id"]))},
-        {"name": "search_vault",
-         "description": "Search vault files for a text query (case-insensitive)",
-         "inputSchema": obj(
-            json!({"query": {"type": "string"}}), json!(["query"]))},
-        {"name": "list_proposals",
-         "description": "List staged proposals and their status",
-         "inputSchema": obj(json!({}), json!([]))},
-        {"name": "propose_decision",
-         "description": "Append an ADR entry to the decision log",
-         "inputSchema": obj(
-            json!({"title": {"type": "string"},
-                   "reason": {"type": "string"},
-                   "status": {"type": "string"},
-                   "scope": {"type": "string"}}),
-            json!(["title", "reason"]))},
-        {"name": "post_message",
-         "description": "Post a message to the agent message log",
-         "inputSchema": obj(
-            json!({"from": {"type": "string"}, "text": {"type": "string"},
-                   "to": {"type": "array", "items": {"type": "string"}},
-                   "reply_to": {"type": "string"}}),
-            json!(["from", "text"]))},
-        {"name": "get_messages",
-         "description": "Read agent messages with optional filters",
+        {"name": "messages",
+         "description": "List open inbox or post a message (action=list|post)",
          "inputSchema": json!({"type": "object",
             "properties": {
-              "limit": {"type": "integer"},
+              "action": {"type": "string"},
+              "agent": {"type": "string"},
               "from": {"type": "string"},
-              "to": {"type": "string"},
+              "text": {"type": "string"},
+              "to": {"type": "array", "items": {"type": "string"}},
+              "reply_to": {"type": "string"},
               "status": {"type": "string"},
-              "unread_for": {"type": "string"}
+              "limit": {"type": "integer"}
             },
+            "required": ["action"],
             "additionalProperties": false})},
-        {"name": "ack_message",
-         "description": "Mark a message read/acked by an agent",
-         "inputSchema": obj(
-            json!({"id": {"type": "string"}, "by": {"type": "string"}}),
-            json!(["id", "by"]))},
-        {"name": "list_roles",
-         "description": "List agent roles",
-         "inputSchema": obj(json!({}), json!([]))},
-        {"name": "get_role",
-         "description": "Get an agent role spec by name",
-         "inputSchema": obj(json!({"name": {"type": "string"}}), json!(["name"]))},
-        {"name": "set_role",
-         "description": "Create or replace an agent role spec",
-         "inputSchema": obj(
-            json!({"name": {"type": "string"},
-                   "summary": {"type": "string"},
-                   "responsibilities": {"type": "array", "items": {"type": "string"}},
-                   "constraints": {"type": "array", "items": {"type": "string"}}}),
-            json!(["name", "summary"]))},
-        {"name": "get_agent_role",
-         "description": "Get the role spec assigned to an agent",
-         "inputSchema": obj(json!({"agent": {"type": "string"}}), json!(["agent"]))},
-        {"name": "get_style_guides",
-         "description": "Return coding conventions from core/style_guides.yml",
-         "inputSchema": obj(json!({}), json!([]))},
-        {"name": "get_brief",
-         "description": "Return the compact project brief",
-         "inputSchema": obj(json!({}), json!([]))},
-        {"name": "get_next_actions",
-         "description": "Return the current next actions",
-         "inputSchema": obj(json!({}), json!([]))},
-        {"name": "get_allowed_scope",
-         "description": "Return capability-aware scope for an agent (or project if agent omitted)",
-         "inputSchema": json!({"type": "object",
-            "properties": {"agent": {"type": "string"}},
-            "additionalProperties": false})},
-        {"name": "get_current_decisions",
-         "description": "Return recent decisions from the brief",
-         "inputSchema": obj(json!({}), json!([]))},
-        {"name": "get_agent_handoff",
-         "description": "Return a rendered handoff prompt for an agent",
-         "inputSchema": obj(json!({"agent": {"type": "string"}}), json!(["agent"]))},
-        {"name": "set_agent_role",
-         "description": "Assign a role to an agent",
-         "inputSchema": obj(
-            json!({"agent": {"type": "string"}, "role": {"type": "string"}}),
-            json!(["agent", "role"]))},
     ]})
 }
 
@@ -212,14 +160,16 @@ fn handle(root: &Path, method: &str, params: &Value) -> Result<Value> {
     }
 }
 
-/// Invoke a vault tool by name.
+/// Invoke a vault tool by name (v1 surface: 8 tools, ADR-0010).
 fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
     match name {
+        "get_active_context" => get_active_context(root, params),
         "read_vault" => {
             let target = str_param(params, "path")?;
-            read_vault(root, target)
+            let start = params.get("start_line").and_then(Value::as_u64);
+            let end = params.get("end_line").and_then(Value::as_u64);
+            read_vault(root, target, start, end)
         }
-        "get_active_context" => read_vault(root, "state/active_context.yml"),
         "list_vault" => {
             let include_proposals = params
                 .get("include_proposals")
@@ -227,87 +177,117 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
                 .unwrap_or(false);
             list_vault(root, include_proposals)
         }
-        // Returns only the registry mappings — never the template contents.
-        "get_tool_registry" => read_vault(root, "plans/tool_registry.yml"),
+        "search_vault" => {
+            let query = str_param(params, "query")?;
+            search_vault(root, query)
+        }
+        "get_tool_registry" => read_vault(root, "plans/tool_registry.yml", None, None),
         "propose_state_update" => {
             let target = str_param(params, "target")?;
             let patch = params
                 .get("patch")
                 .cloned()
                 .ok_or_else(|| anyhow!("missing param 'patch'"))?;
-            let reason = str_param(params, "reason").unwrap_or("");
+            let reason = params
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("");
 
-            // Soft audit: report issues but still stage the proposal.
             let audit = audit_patch(&patch);
-            // Staged only — never mutates active_context.yml directly.
-            let id = crate::commands::proposal::create(root, target, &patch, reason)?;
+            let cfg = crate::core::config::load().unwrap_or_default();
+            let outcome = crate::commands::proposal::create_with_policy(
+                root,
+                target,
+                &patch,
+                reason,
+                cfg.proposals.autoapply_low,
+            )?;
+            if outcome.status == "applied" {
+                let _ = crate::commands::brief::refresh(root);
+            }
             Ok(json!({
-                "proposal_id": id,
-                "status": "pending",
+                "proposal_id": outcome.proposal_id,
+                "status": outcome.status,
+                "superseded": outcome.superseded,
                 "audit_ok": audit.is_ok(),
                 "audit_message": audit.err().map(|e| e.to_string()),
             }))
         }
         "audit_commit" => {
-            // Apply a staged proposal by id (re-audits before applying).
             let id = str_param(params, "id")?;
             crate::commands::proposal::apply(root, id)?;
-            // Keep the brief fresh silently (no stdout — JSON-RPC channel).
             let _ = crate::commands::brief::refresh(root);
             Ok(json!({"committed": true, "proposal_id": id}))
         }
-        "get_style_guides" => crate::commands::style::guides_json(root),
-        "get_brief" => {
-            let brief = crate::commands::brief::load_or_refresh(root)?;
-            serde_json::to_value(&brief).map_err(|e| anyhow!("serializing brief: {e}"))
+        "messages" => messages_tool(root, params),
+        // Legacy tool names → helpful errors after v1 prune.
+        legacy if is_legacy_tool(legacy) => {
+            bail!("tool '{legacy}' removed in v1 MCP surface — use get_active_context, messages, or CLI")
         }
-        "get_next_actions" => {
-            let brief = crate::commands::brief::load_or_refresh(root)?;
-            Ok(json!({ "next_actions": brief.next_actions }))
+        other => bail!("unknown method '{other}'"),
+    }
+}
+
+fn is_legacy_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "get_brief"
+            | "get_next_actions"
+            | "get_current_decisions"
+            | "get_allowed_scope"
+            | "get_agent_handoff"
+            | "get_style_guides"
+            | "post_message"
+            | "get_messages"
+            | "ack_message"
+            | "list_proposals"
+            | "propose_decision"
+            | "list_roles"
+            | "get_role"
+            | "set_role"
+            | "get_agent_role"
+            | "set_agent_role"
+    )
+}
+
+/// Terse consolidated agent context (ADR-0010 / Stage 10B).
+fn get_active_context(root: &Path, params: &Value) -> Result<Value> {
+    let agent = optional_str(params, "agent");
+    let brief = crate::commands::brief::load_or_refresh(root)?;
+    let scope = crate::commands::scope::allowed_scope(root, agent.as_deref())?;
+    let handoff_agent = agent.as_deref().unwrap_or("cursor");
+    let handoff = crate::commands::handoff::render(root, handoff_agent).ok();
+    let inbox = crate::commands::messages::inbox_terse(root, agent.as_deref())?;
+    Ok(json!({
+        "pj": brief.project,
+        "fo": brief.focus,
+        "nx": brief.next_actions,
+        "ct": brief.constraints,
+        "dc": brief.recent_decisions,
+        "sc": scope,
+        "ho": handoff,
+        "ib": inbox,
+        "hs": brief.handoff_summary,
+    }))
+}
+
+fn messages_tool(root: &Path, params: &Value) -> Result<Value> {
+    let action = str_param(params, "action")?;
+    match action {
+        "list" => {
+            let filter = crate::commands::messages::MessageFilter {
+                from: optional_str(params, "from"),
+                to: optional_str(params, "to"),
+                status: optional_str(params, "status").or(Some("open".into())),
+                unread_for: optional_str(params, "agent"),
+                limit: params
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .map(|n| n as usize),
+            };
+            crate::commands::messages::filtered_json(root, &filter)
         }
-        "get_allowed_scope" => {
-            let agent = optional_str(params, "agent");
-            crate::commands::scope::allowed_scope(root, agent.as_deref())
-        }
-        "get_current_decisions" => {
-            let brief = crate::commands::brief::load_or_refresh(root)?;
-            Ok(json!({ "decisions": brief.recent_decisions }))
-        }
-        "get_agent_handoff" => {
-            let agent = str_param(params, "agent")?;
-            let prompt = crate::commands::handoff::render(root, agent)?;
-            Ok(json!({"agent": agent, "prompt": prompt}))
-        }
-        "search_vault" => {
-            let query = str_param(params, "query")?;
-            search_vault(root, query)
-        }
-        "list_proposals" => {
-            let items: Vec<Value> = crate::commands::proposal::all(root)?
-                .into_iter()
-                .map(|p| {
-                    json!({"id": p.id, "status": p.status,
-                           "target": p.target, "reason": p.reason,
-                           "project": p.project})
-                })
-                .collect();
-            Ok(json!({ "proposals": items }))
-        }
-        "propose_decision" => {
-            let title = str_param(params, "title")?;
-            let reason = str_param(params, "reason")?;
-            let status = params
-                .get("status")
-                .and_then(Value::as_str)
-                .unwrap_or("proposed");
-            let scope = params
-                .get("scope")
-                .and_then(Value::as_str)
-                .unwrap_or("global");
-            let id = crate::commands::decision::add_entry(root, title, reason, status, scope)?;
-            Ok(json!({"decision_id": id, "status": status}))
-        }
-        "post_message" => {
+        "post" => {
             let from = str_param(params, "from")?;
             let text = str_param(params, "text")?;
             let to = params
@@ -326,50 +306,7 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             let id = crate::commands::messages::post(root, from, text, to, reply_to)?;
             Ok(json!({"message_id": id}))
         }
-        "get_messages" => {
-            let filter = crate::commands::messages::MessageFilter {
-                from: optional_str(params, "from"),
-                to: optional_str(params, "to"),
-                status: optional_str(params, "status"),
-                unread_for: optional_str(params, "unread_for"),
-                limit: params
-                    .get("limit")
-                    .and_then(Value::as_u64)
-                    .map(|n| n as usize),
-            };
-            crate::commands::messages::filtered_json(root, &filter)
-        }
-        "ack_message" => {
-            let id = str_param(params, "id")?;
-            let by = str_param(params, "by")?;
-            crate::commands::messages::ack(root, id, by)?;
-            Ok(json!({"message_id": id, "acked_by": by}))
-        }
-        "list_roles" => crate::commands::roles::all_json(root),
-        "get_role" => {
-            let name = str_param(params, "name")?;
-            crate::commands::roles::role_json(root, name)
-        }
-        "set_role" => {
-            let name = str_param(params, "name")?;
-            let summary = str_param(params, "summary")?;
-            let resp = str_vec(params, "responsibilities");
-            let constr = str_vec(params, "constraints");
-            crate::commands::roles::set_entry(root, name, summary, resp, constr)?;
-            Ok(json!({"role": name, "set": true}))
-        }
-        "get_agent_role" => {
-            let agent = str_param(params, "agent")?;
-            let role_name = crate::commands::agents::agent_role(root, agent)?;
-            crate::commands::roles::role_json(root, &role_name)
-        }
-        "set_agent_role" => {
-            let agent = str_param(params, "agent")?;
-            let role = str_param(params, "role")?;
-            crate::commands::agents::set_agent_role(root, agent, role)?;
-            Ok(json!({"agent": agent, "role": role}))
-        }
-        other => bail!("unknown method '{other}'"),
+        other => bail!("unknown messages action '{other}' (use list or post)"),
     }
 }
 
@@ -387,20 +324,27 @@ fn optional_str(params: &Value, key: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// Extract an optional array-of-strings param (missing -> empty).
-fn str_vec(params: &Value, key: &str) -> Vec<String> {
-    params
-        .get(key)
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-        .unwrap_or_default()
-}
-
-/// `read_vault`: read a YAML file inside the vault and return it as JSON.
-pub fn read_vault(root: &Path, target: &str) -> Result<Value> {
+/// `read_vault`: read a vault file as JSON, or a line slice when `start_line`/`end_line` set.
+pub fn read_vault(
+    root: &Path,
+    target: &str,
+    start_line: Option<u64>,
+    end_line: Option<u64>,
+) -> Result<Value> {
     let path = safe_vault_path(root, target)?;
     let raw = fs::read_to_string(&path)
         .map_err(|e| anyhow!("reading {}: {e}", path.display()))?;
+
+    if start_line.is_some() || end_line.is_some() {
+        let lines: Vec<&str> = raw.lines().collect();
+        let start = start_line.unwrap_or(1).max(1) as usize;
+        let end = end_line.unwrap_or(lines.len() as u64).max(1) as usize;
+        let hi = end.min(lines.len());
+        let lo = start.saturating_sub(1).min(hi);
+        let content = lines[lo..hi].join("\n");
+        return Ok(json!({"p": target, "c": content}));
+    }
+
     let yaml: serde_yaml::Value = serde_yaml::from_str(&raw)
         .map_err(|e| anyhow!("parsing {}: {e}", path.display()))?;
     serde_json::to_value(yaml).map_err(|e| anyhow!("converting {} to JSON: {e}", path.display()))
@@ -512,7 +456,7 @@ mod tests {
     fn read_vault_returns_json() {
         let root = temp_root("read");
         init(root.to_str().unwrap(), false).unwrap();
-        let v = read_vault(&root, "state/active_context.yml").unwrap();
+        let v = read_vault(&root, "state/active_context.yml", None, None).unwrap();
         assert_eq!(v["project"]["name"], "knogg");
         fs::remove_dir_all(&root).ok();
     }
@@ -533,7 +477,7 @@ mod tests {
         audit_patch(&good).unwrap();
         apply_patch(&root, target, &good).unwrap();
 
-        let after = read_vault(&root, target).unwrap();
+        let after = read_vault(&root, target, None, None).unwrap();
         assert_eq!(after["focus"]["status"], "done");
         // Untouched fields survive the merge.
         assert_eq!(after["project"]["name"], "knogg");
@@ -545,7 +489,8 @@ mod tests {
         let root = temp_root("getctx");
         init(root.to_str().unwrap(), false).unwrap();
         let v = handle(&root, "get_active_context", &json!({})).unwrap();
-        assert_eq!(v["project"]["name"], "knogg");
+        assert_eq!(v["pj"], "knogg");
+        assert!(v["nx"].is_array());
         fs::remove_dir_all(&root).ok();
     }
 
@@ -595,25 +540,25 @@ mod tests {
         let root = temp_root("flow");
         init(root.to_str().unwrap(), false).unwrap();
 
-        let before = read_vault(&root, "state/active_context.yml").unwrap();
+        let before = read_vault(&root, "plans/roles.yml", None, None).unwrap();
         let propose = handle(
             &root,
             "propose_state_update",
-            &json!({"target": "state/active_context.yml",
-                    "patch": {"focus": {"status": "blocked"}},
+            &json!({"target": "plans/roles.yml",
+                    "patch": {"roles": {"reviewer": {"summary": "test"}}},
                     "reason": "waiting on review"}),
         )
         .unwrap();
-        assert_eq!(propose["status"], "pending");
         let id = propose["proposal_id"].as_str().unwrap().to_string();
+        // High-risk target stays pending until audit_commit.
+        assert_eq!(propose["status"], "pending");
 
-        // active_context.yml is untouched until the proposal is committed.
-        let mid = read_vault(&root, "state/active_context.yml").unwrap();
-        assert_eq!(before["focus"]["status"], mid["focus"]["status"]);
+        let mid = read_vault(&root, "plans/roles.yml", None, None).unwrap();
+        assert_eq!(before, mid);
 
         handle(&root, "audit_commit", &json!({ "id": id })).unwrap();
-        let after = read_vault(&root, "state/active_context.yml").unwrap();
-        assert_eq!(after["focus"]["status"], "blocked");
+        let after = read_vault(&root, "plans/roles.yml", None, None).unwrap();
+        assert!(after.get("roles").is_some());
         fs::remove_dir_all(&root).ok();
     }
 
@@ -646,8 +591,9 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
+        assert_eq!(names.len(), 8);
         assert!(names.contains(&"get_active_context"));
-        assert!(names.contains(&"read_vault"));
+        assert!(names.contains(&"messages"));
     }
 
     #[test]
@@ -663,7 +609,7 @@ mod tests {
         assert_eq!(v["isError"], false);
         let text = v["content"][0]["text"].as_str().unwrap();
         let parsed: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(parsed["project"]["name"], "knogg");
+        assert_eq!(parsed["pj"], "knogg");
         fs::remove_dir_all(&root).ok();
     }
 
@@ -684,7 +630,7 @@ mod tests {
         let root = temp_root("direct");
         init(root.to_str().unwrap(), false).unwrap();
         let ctx = handle(&root, "get_active_context", &json!({})).unwrap();
-        assert_eq!(ctx["project"]["name"], "knogg");
+        assert_eq!(ctx["pj"], "knogg");
         let rv = handle(
             &root,
             "read_vault",
@@ -710,17 +656,15 @@ mod tests {
     }
 
     #[test]
-    fn propose_decision_appends_adr() {
-        let root = temp_root("decision");
+    fn legacy_propose_decision_errors() {
+        let root = temp_root("legacydec");
         init(root.to_str().unwrap(), false).unwrap();
-        let v = handle(
+        assert!(handle(
             &root,
             "propose_decision",
             &json!({"title": "Use X", "reason": "because"}),
         )
-        .unwrap();
-        assert_eq!(v["decision_id"], "ADR-0001");
-        assert_eq!(v["status"], "proposed");
+        .is_err());
         fs::remove_dir_all(&root).ok();
     }
 
@@ -728,8 +672,18 @@ mod tests {
     fn messages_post_and_read() {
         let root = temp_root("msg");
         init(root.to_str().unwrap(), false).unwrap();
-        handle(&root, "post_message", &json!({"from": "cursor", "text": "hi"})).unwrap();
-        let v = handle(&root, "get_messages", &json!({})).unwrap();
+        handle(
+            &root,
+            "messages",
+            &json!({"action": "post", "from": "cursor", "text": "hi"}),
+        )
+        .unwrap();
+        let v = handle(
+            &root,
+            "messages",
+            &json!({"action": "list", "status": "open"}),
+        )
+        .unwrap();
         let msgs = v["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["from"], "cursor");
@@ -737,37 +691,10 @@ mod tests {
     }
 
     #[test]
-    fn ack_message_marks_read() {
-        let root = temp_root("ack");
+    fn low_risk_proposal_autoapplies() {
+        let root = temp_root("auto");
         init(root.to_str().unwrap(), false).unwrap();
-        let posted = handle(
-            &root,
-            "post_message",
-            &json!({"from": "claude", "text": "go", "to": ["cursor"]}),
-        )
-        .unwrap();
-        let id = posted["message_id"].as_str().unwrap();
-        handle(
-            &root,
-            "ack_message",
-            &json!({"id": id, "by": "cursor"}),
-        )
-        .unwrap();
-        let unread = handle(
-            &root,
-            "get_messages",
-            &json!({"unread_for": "cursor"}),
-        )
-        .unwrap();
-        assert!(unread["messages"].as_array().unwrap().is_empty());
-        fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn list_proposals_reflects_staged() {
-        let root = temp_root("listprop");
-        init(root.to_str().unwrap(), false).unwrap();
-        handle(
+        let v = handle(
             &root,
             "propose_state_update",
             &json!({"target": "state/active_context.yml",
@@ -775,64 +702,24 @@ mod tests {
                     "reason": "r"}),
         )
         .unwrap();
-        let v = handle(&root, "list_proposals", &json!({})).unwrap();
-        let items = v["proposals"].as_array().unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["status"], "pending");
+        assert_eq!(v["status"], "applied");
+        let ctx = read_vault(&root, "state/active_context.yml", None, None).unwrap();
+        assert_eq!(ctx["focus"]["status"], "done");
         fs::remove_dir_all(&root).ok();
     }
 
     #[test]
-    fn roles_set_get_list() {
-        let root = temp_root("roles");
+    fn read_vault_line_range() {
+        let root = temp_root("lines");
         init(root.to_str().unwrap(), false).unwrap();
-
-        // Seeded default roles are visible.
-        let listed = handle(&root, "list_roles", &json!({})).unwrap();
-        assert!(!listed["roles"].as_array().unwrap().is_empty());
-
-        // set_role then get_role by name.
-        handle(
+        let v = handle(
             &root,
-            "set_role",
-            &json!({"name": "tester", "summary": "Runs tests",
-                    "responsibilities": ["run cargo test"]}),
+            "read_vault",
+            &json!({"path": "state/active_context.yml", "start_line": 1, "end_line": 3}),
         )
         .unwrap();
-        let role = handle(&root, "get_role", &json!({"name": "tester"})).unwrap();
-        assert_eq!(role["summary"], "Runs tests");
-        assert_eq!(role["responsibilities"][0], "run cargo test");
-
-        // Unknown role -> tools/call reports isError.
-        let miss = handle(
-            &root,
-            "tools/call",
-            &json!({"name": "get_role", "arguments": {"name": "ghost"}}),
-        )
-        .unwrap();
-        assert_eq!(miss["isError"], true);
-        fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn agent_role_link_via_mcp() {
-        let root = temp_root("agentrole");
-        init(root.to_str().unwrap(), false).unwrap();
-
-        // Seeded: claude -> reviewer.
-        let v = handle(&root, "get_agent_role", &json!({"agent": "claude"})).unwrap();
-        assert_eq!(v["name"], "reviewer");
-        assert!(!v["responsibilities"].as_array().unwrap().is_empty());
-
-        // Reassign and read back.
-        handle(
-            &root,
-            "set_agent_role",
-            &json!({"agent": "cursor", "role": "reviewer"}),
-        )
-        .unwrap();
-        let v = handle(&root, "get_agent_role", &json!({"agent": "cursor"})).unwrap();
-        assert_eq!(v["name"], "reviewer");
+        assert_eq!(v["p"], "state/active_context.yml");
+        assert!(v["c"].as_str().unwrap().contains("project:"));
         fs::remove_dir_all(&root).ok();
     }
 }

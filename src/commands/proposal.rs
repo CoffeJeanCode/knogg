@@ -17,6 +17,22 @@ use crate::core::vaultio::{atomic_write, today, VaultLock};
 const PENDING: &str = "pending";
 const APPLIED: &str = "applied";
 const REJECTED: &str = "rejected";
+const SUPERSEDED: &str = "superseded";
+
+/// Risk tier for proposal auto-apply (ADR-0011).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProposalRisk {
+    Low,
+    High,
+}
+
+/// Outcome of staging a proposal (may auto-apply or supersede siblings).
+#[derive(Debug)]
+pub struct CreateOutcome {
+    pub proposal_id: String,
+    pub status: String,
+    pub superseded: Vec<String>,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Proposal {
@@ -104,11 +120,48 @@ pub fn all(root: &Path) -> Result<Vec<Proposal>> {
     Ok(out)
 }
 
-/// Create a new pending proposal; returns its id.
-pub fn create(root: &Path, target: &str, patch_json: &JsonValue, reason: &str) -> Result<String> {
-    // Reject targets outside the vault.
+/// Classify proposal risk from target and patch keys (ADR-0011).
+pub fn classify_risk(target: &str, patch: &JsonValue) -> ProposalRisk {
+    const LOW_TARGETS: [&str; 2] = ["state/active_context.yml", "state/brief.yml"];
+    if !LOW_TARGETS.contains(&target) {
+        return ProposalRisk::High;
+    }
+    const ALLOWED: [&str; 4] = ["focus", "next_actions", "handoff", "constraints"];
+    let Some(obj) = patch.as_object() else {
+        return ProposalRisk::Low;
+    };
+    if obj.keys().any(|k| !ALLOWED.contains(&k.as_str())) {
+        ProposalRisk::High
+    } else {
+        ProposalRisk::Low
+    }
+}
+
+/// Mark pending proposals for the same target as superseded.
+pub fn supersede_pending_same_target(root: &Path, target: &str) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    for mut prop in all(root)? {
+        if prop.status == PENDING && prop.target == target {
+            prop.status = SUPERSEDED.to_string();
+            write_proposal(root, &prop)?;
+            ids.push(prop.id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Stage a proposal; optionally auto-apply low-risk patches.
+pub fn create_with_policy(
+    root: &Path,
+    target: &str,
+    patch_json: &JsonValue,
+    reason: &str,
+    autoapply_low: bool,
+) -> Result<CreateOutcome> {
     safe_vault_path(root, target)?;
     let _lock = VaultLock::acquire(root)?;
+    let superseded = supersede_pending_same_target(root, target)?;
+    let risk = classify_risk(target, patch_json);
     let id = next_id(root)?;
     let patch =
         serde_yaml::to_value(patch_json).map_err(|e| anyhow!("converting patch: {e}"))?;
@@ -125,7 +178,25 @@ pub fn create(root: &Path, target: &str, patch_json: &JsonValue, reason: &str) -
         project,
     };
     write_proposal(root, &prop)?;
-    Ok(id)
+
+    if autoapply_low && risk == ProposalRisk::Low {
+        apply_inner(root, &id)?;
+        return Ok(CreateOutcome {
+            proposal_id: id,
+            status: APPLIED.to_string(),
+            superseded,
+        });
+    }
+    Ok(CreateOutcome {
+        proposal_id: id,
+        status: PENDING.to_string(),
+        superseded,
+    })
+}
+
+/// Create a new pending proposal; returns its id (no auto-apply).
+pub fn create(root: &Path, target: &str, patch_json: &JsonValue, reason: &str) -> Result<String> {
+    Ok(create_with_policy(root, target, patch_json, reason, false)?.proposal_id)
 }
 
 /// Apply one proposal. Caller must hold the vault lock.
@@ -360,7 +431,8 @@ mod tests {
         .unwrap();
         assert_eq!(id1, "PROP-0001");
         assert_eq!(id2, "PROP-0002");
-        assert_eq!(load(&root, &id1).unwrap().status, "pending");
+        assert_eq!(load(&root, &id1).unwrap().status, SUPERSEDED);
+        assert_eq!(load(&root, &id2).unwrap().status, PENDING);
         assert_eq!(all(&root).unwrap().len(), 2);
         fs::remove_dir_all(&root).ok();
     }
@@ -447,8 +519,8 @@ mod tests {
         .unwrap();
         let id2 = create(
             &root,
-            "state/active_context.yml",
-            &json!({"focus": {"status": "done"}}),
+            "plans/roles.yml",
+            &json!({"roles": {"tester": {"summary": "tests", "responsibilities": [], "constraints": []}}}),
             "b",
         )
         .unwrap();
@@ -464,7 +536,9 @@ mod tests {
         assert_eq!(load(&root, &id1).unwrap().status, APPLIED);
         assert_eq!(load(&root, &id2).unwrap().status, APPLIED);
         let ctx = crate::core::vault::read_active_context(&root).unwrap();
-        assert_eq!(ctx.focus.status, "done");
+        assert_eq!(ctx.focus.status, "blocked");
+        let roles = fs::read_to_string(root.join("plans/roles.yml")).unwrap();
+        assert!(roles.contains("tester"));
         fs::remove_dir_all(&root).ok();
     }
 

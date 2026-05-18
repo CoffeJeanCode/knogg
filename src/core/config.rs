@@ -15,6 +15,16 @@ const DEFAULT_PATH: &str = "./.knogg";
 pub struct Config {
     #[serde(default)]
     pub knogg: KnoggSection,
+    #[serde(default)]
+    pub proposals: ProposalsSection,
+}
+
+/// Proposal policy from `knogg.toml` (ADR-0011).
+#[derive(Debug, Default, Deserialize)]
+pub struct ProposalsSection {
+    /// When true, low-risk `active_context` / `brief` patches apply immediately.
+    #[serde(default)]
+    pub autoapply_low: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -67,6 +77,7 @@ mod tests {
                 path: path.map(String::from),
                 generated_marker: None,
             },
+            proposals: ProposalsSection::default(),
         }
     }
 
@@ -100,6 +111,9 @@ generated_marker = "<!-- generated-by: knogg -->"
 clipboard = false
 mcp_stdio = true
 watch = true
+
+[proposals]
+autoapply_low = true
 
 [agents]
 codex_output = "AGENTS.md"
