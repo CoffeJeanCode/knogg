@@ -1,2 +1,33 @@
-# style guides
-guides: []
+# Coding conventions for knogg (Rust)
+guides:
+  - lang: rust
+    edition: "2021"
+    formatting:
+      - Run `cargo fmt` inside the dev container before committing
+      - Keep lines readable; match existing file style in each module
+    naming:
+      - Modules/files: snake_case (e.g. vaultio.rs, active_context)
+      - Types/traits: PascalCase (ActiveContext, VaultLock)
+      - Functions: snake_case; CLI entrypoints named cmd_* in command modules
+      - Constants: SCREAMING_SNAKE_CASE for markers and defaults
+    errors:
+      - Use anyhow::Result in commands and CLI boundaries
+      - Context with .context() / .with_context() on I/O and parse failures
+      - bail! for user-facing validation errors (invalid status, paths with ..)
+    safety:
+      - All vault writes under VaultLock + atomic_write (same directory rename)
+      - Reject .. in paths; MCP additionally bounds paths to vault root
+      - Never mutate active_context from MCP without a staged proposal
+    tests:
+      - Unit tests colocated in #[cfg(test)] mod tests at bottom of modules
+      - Use temp dirs under std::env::temp_dir() with unique labels
+      - Run: make test or docker compose run --rm dev cargo test
+    dependencies:
+      - clap 4 derive, serde/serde_yaml, minijinja 2, tokio, anyhow
+      - Optional features: clipboard (arboard)
+    docs:
+      - Module-level //! doc on command modules
+      - README is human-facing; AGENTS.md / adapters are agent-facing
+    yaml_vault:
+      - Prefer serde defaults for optional fields
+      - Keep generated vault files valid YAML; comments OK in plans/

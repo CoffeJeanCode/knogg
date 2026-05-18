@@ -13,14 +13,14 @@ services:
     stdin_open: true
     tty: true
 
-  vault:
+  knogg:
     build:
       context: .
       dockerfile: Dockerfile
     working_dir: /workspace
     volumes:
       - .:/workspace
-    entrypoint: ["vault"]
+    entrypoint: ["knogg"]
 
 volumes:
   cargo-cache:

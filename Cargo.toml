@@ -1,7 +1,13 @@
 [package]
 name = "knogg"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
+description = "Agent context broker — a CLI that keeps a local context store for AI coding agents and brokers context between tools"
+license = "MIT"
+repository = "https://github.com/jeanpierre/knogg"
+readme = "README.md"
+keywords = ["mcp", "ai", "context", "agent", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "knogg"

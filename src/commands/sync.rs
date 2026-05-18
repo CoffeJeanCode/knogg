@@ -1,3 +1,5 @@
+//! `knogg sync` — render tool_registry templates into agent config files.
+
 use std::fs;
 use std::path::Path;
 

@@ -7,4 +7,4 @@ COPY src ./src
 
 RUN cargo build --release
 
-ENTRYPOINT ["./target/release/vault"]
+ENTRYPOINT ["./target/release/knogg"]

@@ -1,2 +1,212 @@
-# master plan
-stages: []
+stages:
+- goal: Initialize vault, core docs, agent registry, and project brief
+  name: Stage 0 — Bootstrap
+  status: done
+  tasks:
+  - Populate core/index.yml, architecture.yml, style_guides.yml
+  - Write master_plan.yml and configure tool/agent registries
+  - Customize AGENTS.md; sync and verify with doctor
+- goal: Vault init, status, state, decision, and integrity checks
+  name: Stage 1 — Core CLI
+  status: done
+  tasks:
+  - knogg init / status / doctor
+  - state set, add-next, clear-next
+  - decision add with ADR log
+- goal: Handoff prompts and generated tool config files
+  name: Stage 2 — Agent brokering
+  status: done
+  tasks:
+  - handoff --to cursor|claude|codex
+  - sync from tool_registry templates
+  - Generated-by marker and human-file protection
+- goal: Agents read vault and stage state changes over stdio
+  name: Stage 3 — MCP server
+  status: done
+  tasks:
+  - JSON-RPC tools (get_active_context, read_vault, list_vault)
+  - propose_state_update + proposal apply/reject CLI
+  - Path boundary checks
+- goal: Per-agent MCP config and roles
+  name: Stage 4 — Agents layer
+  status: done
+  tasks:
+  - agent_registry.yml + agents sync/doctor/inspect
+  - roles.yml + agents set-role
+  - Register knogg MCP in agent configs
+- goal: Compact brief and event-driven refresh/sync
+  name: Stage 5 — Brief & hooks
+  status: done
+  tasks:
+  - state/brief.yml + brief refresh/show/doctor
+  - hooks.yml events
+  - Integrate hooks in state/handoff/proposal paths
+- goal: Smaller MCP responses and agent-specific context profiles
+  name: Stage 6 — Context minimization
+  status: done
+  tasks:
+  - Semantic MCP tools (get_brief, get_next_actions, get_allowed_scope)
+  - Context profiles per agent in agent_registry
+  - Agent notes and decision packets
+- goal: Structured messaging, proposal lifecycle, brief freshness
+  name: Stage 7 — Communication & proposal hygiene
+  status: done
+  tasks:
+  - desc: New subcommand/enum definitions in one batch
+    files:
+    - src/cli.rs
+    id: 7-pre
+    owner: cursor
+    status: done
+  - desc: Structured messages.yml; get_messages filters; ack_message
+    files:
+    - src/commands/messages.rs
+    - src/mcp/mod.rs
+    id: 7A
+    owner: cursor
+    status: done
+  - desc: proposal gc, project tag, doctor flags pending
+    files:
+    - src/commands/proposal.rs
+    - src/commands/doctor.rs
+    id: 7B
+    owner: cursor
+    status: done
+  - desc: Content-hash ensure_brief_fresh; auto-fill handoff_summary
+    files:
+    - src/commands/brief.rs
+    - src/commands/handoff.rs
+    id: 7C
+    owner: cursor
+    status: done
+  - desc: Reap stale/cross-project proposals; reconcile stages
+    files:
+    - .knogg/state/proposals/*
+    id: 7D
+    owner: opencode
+    status: done
+  - desc: make test / doctor / sync verification
+    files: []
+    id: 7E
+    owner: opencode
+    status: done
+  - desc: Bulk multi-id actions, best-effort, single lock
+    files:
+    - src/commands/proposal.rs
+    - src/commands/messages.rs
+    - src/main.rs
+    id: 7F
+    owner: cursor
+    status: done
+  - desc: Atomic rename for knogg release target (ETXTBSY fix)
+    files:
+    - Makefile
+    id: 7G
+    owner: opencode
+    status: done
+  - desc: decision set-status command for proposed ADRs
+    files:
+    - src/commands/decision.rs
+    - src/main.rs
+    id: 7H
+    owner: cursor
+    status: done
+- goal: Capability-based scope and task ownership replace static role gating
+  name: Stage 8 — Dynamic workflows
+  status: in_progress
+  tasks:
+  - desc: capabilities list per agent; capability-aware get_allowed_scope
+    files:
+    - src/commands/scope.rs
+    - src/mcp/mod.rs
+    id: 8A
+    owner: cursor
+    status: done
+  - desc: task claim/release locking; per-task allowed_roles override
+    files:
+    - src/commands/plan.rs
+    - src/cli.rs
+    id: 8B
+    owner: cursor
+    status: done
+  - desc: doctor overlap check on open tasks with intersecting globs
+    files:
+    - src/commands/doctor.rs
+    id: 8C
+    owner: cursor
+    status: done
+  - desc: Populate capabilities per agent; verify with doctor
+    files:
+    - .knogg/plans/agent_registry.yml
+    id: 8D
+    owner: opencode
+    status: in_progress
+  - desc: make test / doctor / sync verification of Stage 8
+    files: []
+    id: 8E
+    owner: opencode
+    status: todo
+- goal: Sibling vaults coordinate via typed contracts, not shared full context
+  name: Stage 9 — Cross-project federation
+  status: todo
+  tasks:
+  - desc: 'workspace.yml manifest: linked vaults by alias+role+path'
+    files:
+    - src/core/config.rs
+    - src/cli.rs
+    id: 9A
+    owner: cursor
+    status: todo
+  - desc: 'contract publish/import: endpoints.yml typed artifact, read-only'
+    files:
+    - src/commands/contract.rs
+    - src/cli.rs
+    id: 9B
+    owner: cursor
+    status: todo
+  - desc: 'cross-vault messaging: post_message --to-project'
+    files:
+    - src/commands/messages.rs
+    - src/mcp/mod.rs
+    id: 9C
+    owner: cursor
+    status: todo
+  - desc: 'handoff --project: prompt scoped to sibling vault, contract delta only'
+    files:
+    - src/commands/handoff.rs
+    id: 9D
+    owner: cursor
+    status: todo
+  - desc: validate linked-vault paths; flag stale contracts
+    files:
+    - src/commands/doctor.rs
+    id: 9E
+    owner: cursor
+    status: todo
+  - desc: populate manifest + contracts for the two real projects
+    files:
+    - .knogg/workspace.yml
+    - .knogg/contracts/*
+    id: 9F
+    owner: opencode
+    status: todo
+  - desc: document federation model; run sync
+    files:
+    - .knogg/core/architecture.yml
+    - AGENTS.md
+    id: 9G
+    owner: opencode
+    status: todo
+stages_append: []
+add_task:
+  stage: Stage 7 — Communication & proposal hygiene
+  task:
+    id: 7F
+    owner: cursor
+    desc: 'Bulk multi-id actions: apply/reject/show/ack accept variadic ids; best-effort with per-item report + nonzero exit on any failure; single VaultLock per batch; after_proposal_apply hook fires once. Variadic clap signatures land in 7-pre (cli.rs).'
+    files:
+    - src/commands/proposal.rs
+    - src/commands/messages.rs
+    - src/main.rs
+    status: done
+    allowed_roles: []

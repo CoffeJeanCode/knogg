@@ -4,8 +4,8 @@ mod core;
 mod mcp;
 
 use clap::Parser;
-use cli::{Cli, Commands, DecisionAction, ProposalAction, StateAction};
-use cli::{AgentsAction, BriefAction, HooksAction, RoleAction};
+use cli::{Cli, Commands, DecisionAction, MessageAction, ProposalAction, StateAction, TaskAction};
+use cli::{AgentsAction, BriefAction, HooksAction, RoleAction, StyleAction};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -29,11 +29,39 @@ fn main() -> anyhow::Result<()> {
         Commands::Status { path } => {
             core::vault::status(&resolve(path))?;
         }
-        Commands::Doctor { path } => {
-            commands::doctor::doctor(&resolve(path), &marker)?;
+        Commands::Doctor { path, pending_proposals } => {
+            commands::doctor::doctor(&resolve(path), &marker, pending_proposals)?;
         }
-        Commands::Handoff { to, path, print, save } => {
-            commands::handoff::handoff(&to, &resolve(path), print, save.as_deref())?;
+        Commands::Handoff { to, path, print, save, fill_summary } => {
+            commands::handoff::handoff(
+                &to,
+                &resolve(path),
+                print,
+                save.as_deref(),
+                fill_summary,
+            )?;
+        }
+        Commands::Messages { path, action } => {
+            let p = resolve(path);
+            match action {
+                MessageAction::List {
+                    from,
+                    to,
+                    status,
+                    unread_for,
+                    limit,
+                } => commands::messages::cmd_list(
+                    &p,
+                    commands::messages::MessageFilter {
+                        from,
+                        to,
+                        status,
+                        unread_for,
+                        limit,
+                    },
+                )?,
+                MessageAction::Ack { ids, by } => commands::messages::cmd_ack(&p, &ids, &by)?,
+            }
         }
         Commands::Sync { path, force, dry_run } => {
             commands::sync::sync(&resolve(path), force, &marker, dry_run)?;
@@ -58,15 +86,21 @@ fn main() -> anyhow::Result<()> {
                 DecisionAction::Add { title, reason, status, scope } => {
                     commands::decision::add(&p, &title, &reason, &status, &scope)?;
                 }
+                DecisionAction::SetStatus { ids, status } => {
+                    commands::decision::cmd_set_status(&p, &ids, &status)?;
+                }
             }
         }
         Commands::Proposal { path, action } => {
             let p = resolve(path);
             match action {
                 ProposalAction::List => commands::proposal::cmd_list(&p)?,
-                ProposalAction::Show { id } => commands::proposal::cmd_show(&p, &id)?,
-                ProposalAction::Apply { id } => commands::proposal::cmd_apply(&p, &id)?,
-                ProposalAction::Reject { id } => commands::proposal::cmd_reject(&p, &id)?,
+                ProposalAction::Show { ids } => commands::proposal::cmd_show(&p, &ids)?,
+                ProposalAction::Apply { ids } => commands::proposal::cmd_apply(&p, &ids)?,
+                ProposalAction::Reject { ids } => commands::proposal::cmd_reject(&p, &ids)?,
+                ProposalAction::Gc { statuses, keep, project } => {
+                    commands::proposal::cmd_gc(&p, statuses, keep, project)?;
+                }
             }
         }
         Commands::Agents { path, action } => {
@@ -133,6 +167,24 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Watch { path } => {
             commands::watch::watch(&resolve(path), &marker)?;
+        }
+        Commands::Task { path, action } => {
+            let p = resolve(path);
+            match action {
+                TaskAction::List => commands::plan::cmd_list(&p)?,
+                TaskAction::Claim { id, agent } => commands::plan::cmd_claim(&p, &id, &agent)?,
+                TaskAction::Release { id, agent } => {
+                    commands::plan::cmd_release(&p, &id, &agent)?;
+                }
+            }
+        }
+        Commands::Style { path, action } => {
+            let p = resolve(path);
+            match action {
+                StyleAction::List => commands::style::cmd_list(&p)?,
+                StyleAction::Show { lang } => commands::style::cmd_show(&p, &lang)?,
+                StyleAction::Doctor { check_fmt } => commands::style::cmd_doctor(&p, check_fmt)?,
+            }
         }
     }
 

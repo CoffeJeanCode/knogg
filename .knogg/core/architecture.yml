@@ -1,2 +1,64 @@
-# architecture overview
-components: []
+# knogg component architecture
+components:
+  - name: CLI (clap)
+    path: src/cli.rs, src/main.rs
+    role: Parse flags/subcommands; resolve vault path from knogg.toml
+    connects_to: [commands, core/config]
+
+  - name: Vault core
+    path: src/core/vault.rs, src/core/vaultio.rs
+    role: Init vault tree; read/write active_context; atomic writes + global lock
+    connects_to: [all commands, MCP]
+
+  - name: State commands
+    path: src/commands/state.rs
+    role: Safe edits to active_context (stage/task/status, next_actions)
+    connects_to: [vault, hooks after_state_change]
+
+  - name: Sync
+    path: src/commands/sync.rs
+    role: Render tool_registry templates → .cursorrules, AGENTS.md, .claude/context.md
+    connects_to: [vault active_context, adapters]
+
+  - name: Handoff
+    path: src/commands/handoff.rs
+    role: Render compact agent prompts from adapters + brief
+    connects_to: [brief, adapters, hooks before_handoff]
+
+  - name: Brief
+    path: src/commands/brief.rs
+    role: Token-cheap snapshot at state/brief.yml for agents and MCP
+    connects_to: [active_context, decision_log, hooks refresh_brief]
+
+  - name: Proposals
+    path: src/commands/proposal.rs, src/mcp (propose_state_update)
+    role: Agents stage patches; humans apply/reject via CLI
+    connects_to: [vault apply_patch, hooks after_proposal_apply]
+
+  - name: MCP server
+    path: src/mcp/mod.rs
+    role: JSON-RPC over stdio — read vault, get context, propose updates
+    connects_to: [vault, brief, proposals, hooks before_mcp_response]
+
+  - name: Agents registry
+    path: src/commands/agents.rs
+    role: Per-agent MCP config sync (.cursor/mcp.json, .mcp.json, …)
+    connects_to: [plans/agent_registry.yml]
+
+  - name: Hooks
+    path: src/commands/hooks.rs
+    role: Event-driven refresh_brief / sync after state or proposal changes
+    connects_to: [brief, sync, handoff, state]
+
+  - name: Wrapper script
+    path: knogg
+    role: Prefer ./dist/knogg; fallback docker compose run dev cargo run
+    connects_to: [Docker dev service]
+
+flows:
+  - name: Human workflow
+    steps: state set → hooks → brief refresh + sync → handoff --to agent
+  - name: Agent workflow
+    steps: MCP get_active_context / get_brief → read_vault → propose_state_update → human proposal apply
+  - name: Build workflow
+    steps: make release → ./knogg <cmd> (native binary)

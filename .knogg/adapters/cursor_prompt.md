@@ -1,5 +1,7 @@
 <!-- generated-by: knogg -->
-# Handoff → Cursor
+# Handoff → Cursor (builder)
+
+**Role: builder** — implement and refactor Rust in `src/`. Hand off test/release runs to OpenCode; design questions to Claude.
 
 Project: {{ project.name }}
 Stage: {{ focus.stage }}
@@ -14,3 +16,11 @@ Status: {{ focus.status }}
 {% endfor %}
 ## Summary
 {{ handoff.summary }}
+
+## Delegation
+
+| Need | Agent |
+|------|--------|
+| Plan, review, ADRs | Claude (architect) |
+| make test, release, knogg doctor | OpenCode (executor) |
+| Code in src/ | You (builder) |

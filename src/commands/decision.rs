@@ -75,6 +75,74 @@ pub fn add(path: &str, title: &str, reason: &str, status: &str, scope: &str) -> 
     Ok(())
 }
 
+fn validate_status(status: &str) -> Result<()> {
+    if ALLOWED_DECISION_STATUS.contains(&status) {
+        Ok(())
+    } else {
+        bail!(
+            "invalid decision status '{status}' (allowed: {})",
+            ALLOWED_DECISION_STATUS.join(", ")
+        )
+    }
+}
+
+/// Update one ADR status. Caller must hold the vault lock.
+fn set_status_inner(log: &mut DecisionLog, id: &str, status: &str) -> Result<()> {
+    validate_status(status)?;
+    let d = log
+        .decisions
+        .iter_mut()
+        .find(|d| d.id == id)
+        .ok_or_else(|| anyhow!("decision '{id}' not found"))?;
+    d.status = status.to_string();
+    Ok(())
+}
+
+/// Update many ADR statuses under one lock. Best-effort — not atomic across ids.
+pub fn set_status_many(
+    root: &Path,
+    ids: &[String],
+    status: &str,
+) -> Result<Vec<(String, Result<()>)>> {
+    validate_status(status)?;
+    let _lock = VaultLock::acquire(root)?;
+    let file = root.join("state/decision_log.yml");
+    let raw = fs::read_to_string(&file)
+        .with_context(|| format!("reading {} (run `knogg init`?)", file.display()))?;
+    let mut log: DecisionLog = serde_yaml::from_str(&raw)
+        .map_err(|e| anyhow!("parsing {}: {e}", file.display()))?;
+
+    let results: Vec<_> = ids
+        .iter()
+        .map(|id| (id.clone(), set_status_inner(&mut log, id, status)))
+        .collect();
+
+    let out = serde_yaml::to_string(&log)
+        .map_err(|e| anyhow!("serializing decision log: {e}"))?;
+    atomic_write(&file, out.as_bytes())?;
+    Ok(results)
+}
+
+/// `knogg decision set-status`: update ADR status(es).
+pub fn cmd_set_status(path: &str, ids: &[String], status: &str) -> Result<()> {
+    let root = resolve_path(path)?;
+    let results = set_status_many(&root, ids, status)?;
+    let mut any_fail = false;
+    for (id, res) in &results {
+        match res {
+            Ok(()) => println!("updated {id} -> {status}"),
+            Err(e) => {
+                println!("FAILED {id}: {e:#}");
+                any_fail = true;
+            }
+        }
+    }
+    if any_fail {
+        bail!("one or more decisions failed to update");
+    }
+    Ok(())
+}
+
 /// Compact decision summary for the brief.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DecisionSummary {
@@ -155,6 +223,31 @@ mod tests {
         let p = root.to_str().unwrap();
         init(p, false).unwrap();
         assert!(add(p, "X", "y", "maybe", "global").is_err());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn set_status_updates_and_is_best_effort() {
+        let root = temp_root("setstatus");
+        let p = root.to_str().unwrap();
+        init(p, false).unwrap();
+        add(p, "A", "r", "proposed", "global").unwrap();
+        add(p, "B", "r", "proposed", "global").unwrap();
+
+        let results = set_status_many(
+            &root,
+            &["ADR-0001".into(), "ADR-9999".into(), "ADR-0002".into()],
+            "accepted",
+        )
+        .unwrap();
+        assert!(results[0].1.is_ok());
+        assert!(results[1].1.is_err());
+        assert!(results[2].1.is_ok());
+
+        let raw = fs::read_to_string(root.join("state/decision_log.yml")).unwrap();
+        let log: DecisionLog = serde_yaml::from_str(&raw).unwrap();
+        assert_eq!(log.decisions[0].status, "accepted");
+        assert_eq!(log.decisions[1].status, "accepted");
         std::fs::remove_dir_all(&root).ok();
     }
 }
