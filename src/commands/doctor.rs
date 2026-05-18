@@ -1,3 +1,5 @@
+//! `knogg doctor` — vault integrity and convention checks.
+
 use std::fs;
 use std::path::Path;
 
@@ -53,16 +55,17 @@ pub struct Report {
 }
 
 impl Report {
-    fn new() -> Self {
+    /// Empty report for auxiliary commands (e.g. `knogg style doctor`).
+    pub fn new() -> Self {
         Report { checks: Vec::new() }
     }
-    fn ok(&mut self, m: impl Into<String>) {
+    pub fn ok(&mut self, m: impl Into<String>) {
         self.checks.push(Check { level: Level::Ok, message: m.into() });
     }
-    fn warn(&mut self, m: impl Into<String>) {
+    pub fn warn(&mut self, m: impl Into<String>) {
         self.checks.push(Check { level: Level::Warn, message: m.into() });
     }
-    fn error(&mut self, m: impl Into<String>) {
+    pub fn error(&mut self, m: impl Into<String>) {
         self.checks.push(Check { level: Level::Error, message: m.into() });
     }
     pub fn has_errors(&self) -> bool {
@@ -86,7 +89,7 @@ struct ToolEntry {
 /// Inspect a vault and collect health checks (pure: no process exit).
 ///
 /// `marker` is the generated-by marker (from `knogg.toml`, or the default).
-pub fn diagnose(path: &str, marker: &str) -> Report {
+pub fn diagnose(path: &str, marker: &str, flag_pending_proposals: bool) -> Report {
     let mut r = Report::new();
 
     let root = match resolve_path(path) {
@@ -132,7 +135,38 @@ pub fn diagnose(path: &str, marker: &str) -> Report {
     }
 
     diagnose_registry(&mut r, &root, marker);
+    if flag_pending_proposals {
+        diagnose_pending_proposals(&mut r, &root);
+    }
+    diagnose_task_overlaps(&mut r, &root);
+    crate::commands::style::diagnose_conventions(&mut r, &root, false);
     r
+}
+
+fn diagnose_task_overlaps(r: &mut Report, root: &Path) {
+    match crate::commands::plan::overlap_conflicts(root) {
+        Ok(conflicts) if conflicts.is_empty() => r.ok("no open-task file overlaps"),
+        Ok(conflicts) => {
+            for (a, b, glob) in conflicts {
+                r.error(format!("tasks {a} and {b} overlap on {glob}"));
+            }
+        }
+        Err(e) => r.warn(format!("could not check task overlaps: {e}")),
+    }
+}
+
+fn diagnose_pending_proposals(r: &mut Report, root: &Path) {
+    match crate::commands::proposal::all(root) {
+        Ok(proposals) => {
+            let pending = proposals.iter().filter(|p| p.status == "pending").count();
+            if pending > 0 {
+                r.warn(format!("{pending} pending proposal(s) (review with `knogg proposal list`)"));
+            } else {
+                r.ok("no pending proposals");
+            }
+        }
+        Err(e) => r.warn(format!("could not scan proposals: {e}")),
+    }
 }
 
 /// Validate the templates and outputs declared in `tool_registry.yml`.
@@ -191,8 +225,8 @@ fn check_output(r: &mut Report, name: &str, output: &str, marker: &str) {
 }
 
 /// `knogg doctor`: print the report and exit non-zero if anything failed.
-pub fn doctor(path: &str, marker: &str) -> Result<()> {
-    let report = diagnose(path, marker);
+pub fn doctor(path: &str, marker: &str, flag_pending_proposals: bool) -> Result<()> {
+    let report = diagnose(path, marker, flag_pending_proposals);
 
     println!("knogg doctor\n");
     for check in &report.checks {
@@ -232,7 +266,7 @@ mod tests {
     fn fresh_vault_is_healthy() {
         let root = temp_root("healthy");
         init(root.to_str().unwrap(), false).unwrap();
-        let report = diagnose(root.to_str().unwrap(), MARKER);
+        let report = diagnose(root.to_str().unwrap(), MARKER, true);
         assert!(!report.has_errors(), "fresh vault should have no errors");
         fs::remove_dir_all(&root).ok();
     }
@@ -243,7 +277,7 @@ mod tests {
         init(root.to_str().unwrap(), false).unwrap();
         fs::remove_file(root.join("state/decision_log.yml")).unwrap();
 
-        let report = diagnose(root.to_str().unwrap(), MARKER);
+        let report = diagnose(root.to_str().unwrap(), MARKER, true);
         assert!(report.has_errors());
         assert!(report
             .checks
@@ -255,8 +289,26 @@ mod tests {
     #[test]
     fn missing_vault_is_reported() {
         let root = temp_root("absent");
-        let report = diagnose(root.to_str().unwrap(), MARKER);
+        let report = diagnose(root.to_str().unwrap(), MARKER, true);
         assert!(report.has_errors());
+    }
+
+    #[test]
+    fn pending_proposals_are_flagged() {
+        let root = temp_root("pending");
+        init(root.to_str().unwrap(), false).unwrap();
+        crate::commands::proposal::create(
+            &root,
+            "state/active_context.yml",
+            &serde_json::json!({"focus": {"status": "blocked"}}),
+            "wait",
+        )
+        .unwrap();
+        let report = diagnose(root.to_str().unwrap(), MARKER, true);
+        assert!(report.checks.iter().any(|c| {
+            c.level == Level::Warn && c.message.contains("pending proposal")
+        }));
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]
@@ -269,7 +321,7 @@ mod tests {
         )
         .unwrap();
 
-        let report = diagnose(root.to_str().unwrap(), MARKER);
+        let report = diagnose(root.to_str().unwrap(), MARKER, true);
         assert!(report.has_errors());
         assert!(report
             .checks

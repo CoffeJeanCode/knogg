@@ -1,3 +1,5 @@
+//! `knogg watch` — react to vault file changes with sync.
+
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::time::Duration;

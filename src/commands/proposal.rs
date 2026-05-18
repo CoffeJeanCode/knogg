@@ -26,6 +26,9 @@ pub struct Proposal {
     pub reason: String,
     pub created: String,
     pub patch: serde_yaml::Value,
+    /// Vault project name when the proposal was created.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub project: String,
 }
 
 /// Directory holding proposal files.
@@ -109,6 +112,9 @@ pub fn create(root: &Path, target: &str, patch_json: &JsonValue, reason: &str) -
     let id = next_id(root)?;
     let patch =
         serde_yaml::to_value(patch_json).map_err(|e| anyhow!("converting patch: {e}"))?;
+    let project = crate::core::vault::read_active_context(root)
+        .map(|c| c.project.name)
+        .unwrap_or_default();
     let prop = Proposal {
         id: id.clone(),
         status: PENDING.to_string(),
@@ -116,15 +122,14 @@ pub fn create(root: &Path, target: &str, patch_json: &JsonValue, reason: &str) -
         reason: reason.to_string(),
         created: today(),
         patch,
+        project,
     };
     write_proposal(root, &prop)?;
     Ok(id)
 }
 
-/// Apply a pending proposal: re-audit, apply the patch, mark it applied.
-pub fn apply(root: &Path, id: &str) -> Result<()> {
-    // One lock covers the patch apply and the proposal status update.
-    let _lock = VaultLock::acquire(root)?;
+/// Apply one proposal. Caller must hold the vault lock.
+pub fn apply_inner(root: &Path, id: &str) -> Result<()> {
     let mut prop = load(root, id)?;
     if prop.status != PENDING {
         bail!(
@@ -141,9 +146,23 @@ pub fn apply(root: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Reject a pending proposal.
-pub fn reject(root: &Path, id: &str) -> Result<()> {
+/// Apply a pending proposal (acquires lock).
+pub fn apply(root: &Path, id: &str) -> Result<()> {
     let _lock = VaultLock::acquire(root)?;
+    apply_inner(root, id)
+}
+
+/// Apply many proposals under one lock. Best-effort — not atomic.
+pub fn apply_many(root: &Path, ids: &[String]) -> Result<Vec<(String, Result<()>)>> {
+    let _lock = VaultLock::acquire(root)?;
+    Ok(ids
+        .iter()
+        .map(|id| (id.clone(), apply_inner(root, id)))
+        .collect())
+}
+
+/// Reject one proposal. Caller must hold the vault lock.
+pub fn reject_inner(root: &Path, id: &str) -> Result<()> {
     let mut prop = load(root, id)?;
     if prop.status != PENDING {
         bail!(
@@ -154,6 +173,15 @@ pub fn reject(root: &Path, id: &str) -> Result<()> {
     prop.status = REJECTED.to_string();
     write_proposal(root, &prop)?;
     Ok(())
+}
+
+/// Reject many proposals under one lock. Best-effort — not atomic.
+pub fn reject_many(root: &Path, ids: &[String]) -> Result<Vec<(String, Result<()>)>> {
+    let _lock = VaultLock::acquire(root)?;
+    Ok(ids
+        .iter()
+        .map(|id| (id.clone(), reject_inner(root, id)))
+        .collect())
 }
 
 // ---- CLI wrappers (print human-readable output) ----
@@ -171,34 +199,128 @@ pub fn cmd_list(path: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn cmd_show(path: &str, id: &str) -> Result<()> {
-    let root = resolve_path(path)?;
-    let p = load(&root, id)?;
+fn print_proposal(p: &Proposal) {
     println!("id:      {}", p.id);
     println!("status:  {}", p.status);
     println!("target:  {}", p.target);
     println!("created: {}", p.created);
     println!("reason:  {}", p.reason);
+    if !p.project.is_empty() {
+        println!("project: {}", p.project);
+    }
     let patch = serde_yaml::to_string(&p.patch).unwrap_or_default();
     println!("patch:\n{}", patch.trim_end());
-    Ok(())
 }
 
-pub fn cmd_apply(path: &str, id: &str) -> Result<()> {
+pub fn cmd_show(path: &str, ids: &[String]) -> Result<()> {
     let root = resolve_path(path)?;
-    apply(&root, id)?;
-    println!("applied {id}");
-    // F6: after_proposal_apply hooks (lock already released by `apply`).
-    if let Err(e) = crate::commands::hooks::run(&root, "after_proposal_apply") {
-        eprintln!("hook warning: {e}");
+    for (i, id) in ids.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        print_proposal(&load(&root, id)?);
     }
     Ok(())
 }
 
-pub fn cmd_reject(path: &str, id: &str) -> Result<()> {
+fn report_batch_results(results: &[(String, Result<()>)], ok_label: &str) -> (bool, bool) {
+    let mut any_ok = false;
+    let mut any_fail = false;
+    for (id, res) in results {
+        match res {
+            Ok(()) => {
+                println!("{ok_label} {id}");
+                any_ok = true;
+            }
+            Err(e) => {
+                println!("FAILED {id}: {e:#}");
+                any_fail = true;
+            }
+        }
+    }
+    (any_ok, any_fail)
+}
+
+pub fn cmd_apply(path: &str, ids: &[String]) -> Result<()> {
     let root = resolve_path(path)?;
-    reject(&root, id)?;
-    println!("rejected {id}");
+    let results = apply_many(&root, ids)?;
+    let (any_ok, any_fail) = report_batch_results(&results, "applied");
+    if any_ok {
+        if let Err(e) = crate::commands::hooks::run(&root, "after_proposal_apply") {
+            eprintln!("hook warning: {e}");
+        }
+    }
+    if any_fail {
+        bail!("one or more proposals failed to apply");
+    }
+    Ok(())
+}
+
+pub fn cmd_reject(path: &str, ids: &[String]) -> Result<()> {
+    let root = resolve_path(path)?;
+    let results = reject_many(&root, ids)?;
+    let (_, any_fail) = report_batch_results(&results, "rejected");
+    if any_fail {
+        bail!("one or more proposals failed to reject");
+    }
+    Ok(())
+}
+
+/// Remove terminal proposals from disk.
+pub fn gc(
+    root: &Path,
+    statuses: &[String],
+    keep: Option<usize>,
+    project: Option<&str>,
+) -> Result<usize> {
+    let terminal: Vec<&str> = if statuses.is_empty() {
+        vec![APPLIED, REJECTED]
+    } else {
+        statuses.iter().map(String::as_str).collect()
+    };
+    let _lock = VaultLock::acquire(root)?;
+    let mut removed = 0usize;
+    let mut by_status: std::collections::BTreeMap<String, Vec<Proposal>> =
+        std::collections::BTreeMap::new();
+    for p in all(root)? {
+        if !terminal.contains(&p.status.as_str()) {
+            continue;
+        }
+        if let Some(proj) = project {
+            if !p.project.is_empty() && p.project != proj {
+                continue;
+            }
+        }
+        by_status.entry(p.status.clone()).or_default().push(p);
+    }
+    for proposals in by_status.values_mut() {
+        proposals.sort_by(|a, b| a.id.cmp(&b.id));
+        let drop_count = match keep {
+            Some(n) if proposals.len() > n => proposals.len() - n,
+            _ => proposals.len(),
+        };
+        for p in proposals.iter().take(drop_count) {
+            fs::remove_file(proposal_path(root, &p.id)?)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+pub fn cmd_gc(
+    path: &str,
+    statuses: Vec<String>,
+    keep: Option<usize>,
+    project: Option<String>,
+) -> Result<()> {
+    let root = resolve_path(path)?;
+    for s in &statuses {
+        if s != APPLIED && s != REJECTED && s != PENDING {
+            bail!("invalid gc status '{s}' (allowed: applied, rejected, pending)");
+        }
+    }
+    let n = gc(&root, &statuses, keep, project.as_deref())?;
+    println!("gc removed {n} proposal(s)");
     Ok(())
 }
 
@@ -262,7 +384,8 @@ mod tests {
 
         // Already applied -> cannot apply or reject again.
         assert!(apply(&root, &id).is_err());
-        assert!(reject(&root, &id).is_err());
+        let re = reject_many(&root, &[id.clone()]).unwrap();
+        assert!(re[0].1.is_err());
         fs::remove_dir_all(&root).ok();
     }
 
@@ -278,7 +401,7 @@ mod tests {
         )
         .unwrap();
 
-        reject(&root, &id).unwrap();
+        reject_many(&root, &[id.clone()]).unwrap();
         assert_eq!(load(&root, &id).unwrap().status, "rejected");
         assert!(apply(&root, &id).is_err());
         fs::remove_dir_all(&root).ok();
@@ -290,5 +413,73 @@ mod tests {
         assert!(validate_id("../etc").is_err());
         assert!(validate_id("PROP-").is_err());
         assert!(validate_id("ADR-0001").is_err());
+    }
+
+    #[test]
+    fn gc_removes_terminal_proposals() {
+        let root = temp_root("gc");
+        init(root.to_str().unwrap(), false).unwrap();
+        let id = create(
+            &root,
+            "state/active_context.yml",
+            &json!({"focus": {"status": "done"}}),
+            "done",
+        )
+        .unwrap();
+        apply(&root, &id).unwrap();
+        assert_eq!(all(&root).unwrap().len(), 1);
+        let n = gc(&root, &[], None, None).unwrap();
+        assert_eq!(n, 1);
+        assert!(all(&root).unwrap().is_empty());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn apply_many_is_best_effort() {
+        let root = temp_root("batch");
+        init(root.to_str().unwrap(), false).unwrap();
+        let id1 = create(
+            &root,
+            "state/active_context.yml",
+            &json!({"focus": {"status": "blocked"}}),
+            "a",
+        )
+        .unwrap();
+        let id2 = create(
+            &root,
+            "state/active_context.yml",
+            &json!({"focus": {"status": "done"}}),
+            "b",
+        )
+        .unwrap();
+        let results = apply_many(
+            &root,
+            &[id1.clone(), "PROP-9999".into(), id2.clone()],
+        )
+        .unwrap();
+        assert_eq!(results.len(), 3);
+        assert!(results[0].1.is_ok());
+        assert!(results[1].1.is_err());
+        assert!(results[2].1.is_ok());
+        assert_eq!(load(&root, &id1).unwrap().status, APPLIED);
+        assert_eq!(load(&root, &id2).unwrap().status, APPLIED);
+        let ctx = crate::core::vault::read_active_context(&root).unwrap();
+        assert_eq!(ctx.focus.status, "done");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn proposal_records_project_tag() {
+        let root = temp_root("proj");
+        init(root.to_str().unwrap(), false).unwrap();
+        let id = create(
+            &root,
+            "state/active_context.yml",
+            &json!({"focus": {"status": "todo"}}),
+            "r",
+        )
+        .unwrap();
+        assert_eq!(load(&root, &id).unwrap().project, "knogg");
+        fs::remove_dir_all(&root).ok();
     }
 }

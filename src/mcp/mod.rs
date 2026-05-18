@@ -124,13 +124,26 @@ fn tools_list() -> Value {
         {"name": "post_message",
          "description": "Post a message to the agent message log",
          "inputSchema": obj(
-            json!({"from": {"type": "string"}, "text": {"type": "string"}}),
+            json!({"from": {"type": "string"}, "text": {"type": "string"},
+                   "to": {"type": "array", "items": {"type": "string"}},
+                   "reply_to": {"type": "string"}}),
             json!(["from", "text"]))},
         {"name": "get_messages",
-         "description": "Read recent agent messages",
+         "description": "Read agent messages with optional filters",
          "inputSchema": json!({"type": "object",
-            "properties": {"limit": {"type": "integer"}},
+            "properties": {
+              "limit": {"type": "integer"},
+              "from": {"type": "string"},
+              "to": {"type": "string"},
+              "status": {"type": "string"},
+              "unread_for": {"type": "string"}
+            },
             "additionalProperties": false})},
+        {"name": "ack_message",
+         "description": "Mark a message read/acked by an agent",
+         "inputSchema": obj(
+            json!({"id": {"type": "string"}, "by": {"type": "string"}}),
+            json!(["id", "by"]))},
         {"name": "list_roles",
          "description": "List agent roles",
          "inputSchema": obj(json!({}), json!([]))},
@@ -148,6 +161,9 @@ fn tools_list() -> Value {
         {"name": "get_agent_role",
          "description": "Get the role spec assigned to an agent",
          "inputSchema": obj(json!({"agent": {"type": "string"}}), json!(["agent"]))},
+        {"name": "get_style_guides",
+         "description": "Return coding conventions from core/style_guides.yml",
+         "inputSchema": obj(json!({}), json!([]))},
         {"name": "get_brief",
          "description": "Return the compact project brief",
          "inputSchema": obj(json!({}), json!([]))},
@@ -155,8 +171,10 @@ fn tools_list() -> Value {
          "description": "Return the current next actions",
          "inputSchema": obj(json!({}), json!([]))},
         {"name": "get_allowed_scope",
-         "description": "Return the constraints and scope an agent must respect",
-         "inputSchema": obj(json!({}), json!([]))},
+         "description": "Return capability-aware scope for an agent (or project if agent omitted)",
+         "inputSchema": json!({"type": "object",
+            "properties": {"agent": {"type": "string"}},
+            "additionalProperties": false})},
         {"name": "get_current_decisions",
          "description": "Return recent decisions from the brief",
          "inputSchema": obj(json!({}), json!([]))},
@@ -238,6 +256,7 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             let _ = crate::commands::brief::refresh(root);
             Ok(json!({"committed": true, "proposal_id": id}))
         }
+        "get_style_guides" => crate::commands::style::guides_json(root),
         "get_brief" => {
             let brief = crate::commands::brief::load_or_refresh(root)?;
             serde_json::to_value(&brief).map_err(|e| anyhow!("serializing brief: {e}"))
@@ -247,8 +266,8 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             Ok(json!({ "next_actions": brief.next_actions }))
         }
         "get_allowed_scope" => {
-            let brief = crate::commands::brief::load_or_refresh(root)?;
-            Ok(json!({"scope": "project", "constraints": brief.constraints}))
+            let agent = optional_str(params, "agent");
+            crate::commands::scope::allowed_scope(root, agent.as_deref())
         }
         "get_current_decisions" => {
             let brief = crate::commands::brief::load_or_refresh(root)?;
@@ -268,7 +287,8 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
                 .into_iter()
                 .map(|p| {
                     json!({"id": p.id, "status": p.status,
-                           "target": p.target, "reason": p.reason})
+                           "target": p.target, "reason": p.reason,
+                           "project": p.project})
                 })
                 .collect();
             Ok(json!({ "proposals": items }))
@@ -290,15 +310,40 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
         "post_message" => {
             let from = str_param(params, "from")?;
             let text = str_param(params, "text")?;
-            let id = crate::commands::messages::post(root, from, text)?;
+            let to = params
+                .get("to")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect::<Vec<_>>()
+                })
+                .filter(|v| !v.is_empty());
+            let reply_to = params
+                .get("reply_to")
+                .and_then(Value::as_str)
+                .map(String::from);
+            let id = crate::commands::messages::post(root, from, text, to, reply_to)?;
             Ok(json!({"message_id": id}))
         }
         "get_messages" => {
-            let limit = params
-                .get("limit")
-                .and_then(Value::as_u64)
-                .map(|n| n as usize);
-            crate::commands::messages::recent_json(root, limit)
+            let filter = crate::commands::messages::MessageFilter {
+                from: optional_str(params, "from"),
+                to: optional_str(params, "to"),
+                status: optional_str(params, "status"),
+                unread_for: optional_str(params, "unread_for"),
+                limit: params
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .map(|n| n as usize),
+            };
+            crate::commands::messages::filtered_json(root, &filter)
+        }
+        "ack_message" => {
+            let id = str_param(params, "id")?;
+            let by = str_param(params, "by")?;
+            crate::commands::messages::ack(root, id, by)?;
+            Ok(json!({"message_id": id, "acked_by": by}))
         }
         "list_roles" => crate::commands::roles::all_json(root),
         "get_role" => {
@@ -333,6 +378,13 @@ fn str_param<'a>(params: &'a Value, key: &str) -> Result<&'a str> {
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("missing or invalid param '{key}'"))
+}
+
+fn optional_str(params: &Value, key: &str) -> Option<String> {
+    params
+        .get(key)
+        .and_then(Value::as_str)
+        .map(String::from)
 }
 
 /// Extract an optional array-of-strings param (missing -> empty).
@@ -681,6 +733,33 @@ mod tests {
         let msgs = v["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["from"], "cursor");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn ack_message_marks_read() {
+        let root = temp_root("ack");
+        init(root.to_str().unwrap(), false).unwrap();
+        let posted = handle(
+            &root,
+            "post_message",
+            &json!({"from": "claude", "text": "go", "to": ["cursor"]}),
+        )
+        .unwrap();
+        let id = posted["message_id"].as_str().unwrap();
+        handle(
+            &root,
+            "ack_message",
+            &json!({"id": id, "by": "cursor"}),
+        )
+        .unwrap();
+        let unread = handle(
+            &root,
+            "get_messages",
+            &json!({"unread_for": "cursor"}),
+        )
+        .unwrap();
+        assert!(unread["messages"].as_array().unwrap().is_empty());
         fs::remove_dir_all(&root).ok();
     }
 

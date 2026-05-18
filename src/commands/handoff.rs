@@ -1,3 +1,5 @@
+//! `knogg handoff` — render compact agent prompts from adapters and brief.
+
 use std::fs;
 use std::path::Path;
 
@@ -14,7 +16,8 @@ fn adapter_for(agent: &str) -> Result<&'static str> {
         "cursor" => Ok("adapters/cursor_prompt.md"),
         "claude" => Ok("adapters/claude_code.md"),
         "codex" => Ok("adapters/codex_prompt.md"),
-        other => bail!("unknown agent '{other}' (expected: cursor, claude, codex)"),
+        "opencode" => Ok("adapters/opencode_prompt.md"),
+        other => bail!("unknown agent '{other}' (expected: cursor, claude, codex, opencode)"),
     }
 }
 
@@ -70,8 +73,11 @@ fn brief_context(brief: &crate::commands::brief::Brief, profile: Option<&crate::
 ///
 /// Output: `--save` writes to a file, `--print` writes to stdout (both may be
 /// combined). With neither, fall back to clipboard-or-stdout.
-pub fn handoff(agent: &str, path: &str, print: bool, save: Option<&str>) -> Result<()> {
+pub fn handoff(agent: &str, path: &str, print: bool, save: Option<&str>, fill_summary: bool) -> Result<()> {
     let root = resolve_path(path)?;
+    if fill_summary {
+        let _ = crate::commands::brief::auto_fill_handoff_summary(&root);
+    }
     // F6: before_handoff hooks (e.g. refresh the brief).
     if let Err(e) = crate::commands::hooks::run(&root, "before_handoff") {
         eprintln!("hook warning: {e}");
@@ -144,7 +150,7 @@ mod tests {
         let root = temp_root("render");
         init(root.to_str().unwrap(), false).unwrap();
 
-        handoff("cursor", root.to_str().unwrap(), true, None).unwrap();
+        handoff("cursor", root.to_str().unwrap(), true, None, false).unwrap();
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -153,9 +159,9 @@ mod tests {
         let root = temp_root("missing");
         init(root.to_str().unwrap(), false).unwrap();
 
-        assert!(handoff("codex", root.to_str().unwrap(), true, None).is_ok());
+        assert!(handoff("codex", root.to_str().unwrap(), true, None, false).is_ok());
         std::fs::remove_file(root.join("adapters/codex_prompt.md")).unwrap();
-        assert!(handoff("codex", root.to_str().unwrap(), true, None).is_err());
+        assert!(handoff("codex", root.to_str().unwrap(), true, None, false).is_err());
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -170,6 +176,7 @@ mod tests {
             root.to_str().unwrap(),
             false,
             Some(out.to_str().unwrap()),
+            false,
         )
         .unwrap();
 
@@ -182,6 +189,7 @@ mod tests {
             root.to_str().unwrap(),
             false,
             Some(out.to_str().unwrap()),
+            false,
         )
         .unwrap();
         assert!(fs::read_to_string(&out).unwrap().contains("Claude"));

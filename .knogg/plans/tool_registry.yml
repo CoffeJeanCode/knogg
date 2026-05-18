@@ -6,6 +6,6 @@ tools:
   - name: claude
     template: adapters/claude_code.md
     output: .claude/context.md
-  - name: codex
-    template: adapters/codex_prompt.md
+  - name: opencode
+    template: adapters/opencode_prompt.md
     output: AGENTS.md

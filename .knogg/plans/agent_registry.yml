@@ -3,7 +3,7 @@ workspace:
   name: knogg
   scope: project
 defaults:
-  generated_marker: "<!-- generated-by: knogg -->"
+  generated_marker: '<!-- generated-by: knogg -->'
   protect_human_files: true
   default_mcp_server: knogg
 mcp_servers:
@@ -12,43 +12,43 @@ mcp_servers:
     transport: stdio
     command: ./knogg
     args:
-      - mcp
+    - mcp
     env: {}
     description: Local knogg MCP server
 agents:
-  cursor:
-    enabled: true
-    kind: cursor
-    role: implementer
-    outputs:
-      mcp_config: .cursor/mcp.json
-      instructions: .cursorrules
-    mcp_servers:
-      - knogg
   claude:
     enabled: true
     kind: claude_code
-    role: reviewer
+    role: architect
     outputs:
       mcp_config: .mcp.json
       instructions: .claude/context.md
     mcp_servers:
-      - knogg
+    - knogg
   codex:
-    enabled: true
+    enabled: false
     kind: codex
-    role: implementer
+    role: executor
     outputs:
       mcp_config: .codex/config.toml
       instructions: AGENTS.md
     mcp_servers:
-      - knogg
+    - knogg
+  cursor:
+    enabled: true
+    kind: cursor
+    role: builder
+    outputs:
+      mcp_config: .cursor/mcp.json
+      instructions: .cursorrules
+    mcp_servers:
+    - knogg
   opencode:
     enabled: true
     kind: opencode
-    role: implementer
+    role: executor
     outputs:
       mcp_config: opencode.json
       instructions: AGENTS.md
     mcp_servers:
-      - knogg
+    - knogg

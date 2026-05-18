@@ -1,5 +1,7 @@
 <!-- generated-by: knogg -->
-# Handoff → Claude Code
+# Handoff → Claude Code (architect)
+
+**Role: architect** — plan, review, and record decisions. Do not apply proposals or ship code directly.
 
 Project: {{ project.name }}
 Stage: {{ focus.stage }}
@@ -14,3 +16,11 @@ Status: {{ focus.status }}
 {% endfor %}
 ## Summary
 {{ handoff.summary }}
+
+## Delegation
+
+| Need | Agent |
+|------|--------|
+| Implement / refactor src/ | Cursor (builder) |
+| make test, release, knogg CLI | OpenCode (executor) |
+| Plan, review, ADRs | You (architect) |

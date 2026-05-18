@@ -14,9 +14,11 @@ release:
 	docker compose run --rm dev cargo build --release --target x86_64-pc-windows-gnu
 	mkdir -p dist
 	docker compose run --rm dev sh -c '\
-		cp /app/target/release/knogg /app/dist/knogg && \
-		chmod +x /app/dist/knogg && \
-		cp /app/target/x86_64-pc-windows-gnu/release/knogg.exe /app/dist/knogg.exe'
+		cp /app/target/release/knogg /app/dist/.knogg.new && \
+		chmod +x /app/dist/.knogg.new && \
+		mv -f /app/dist/.knogg.new /app/dist/knogg && \
+		cp /app/target/x86_64-pc-windows-gnu/release/knogg.exe /app/dist/.knogg.exe.new && \
+		mv -f /app/dist/.knogg.exe.new /app/dist/knogg.exe'
 
 run:
 	docker compose run --rm dev cargo run --
@@ -33,19 +35,18 @@ handoff:
 sync:
 	docker compose run --rm dev cargo run -- sync --path ./.knogg
 
-# --- kindle-to-obsidian (nested crate; build artifacts under kindle-to-obsidian/target/) ---
-kindle-test:
-	docker compose run --rm dev cargo test --manifest-path kindle-to-obsidian/Cargo.toml
+clean:
+	docker compose run --rm dev cargo clean
+	rm -rf dist/
 
-kindle-build:
-	docker compose run --rm dev cargo build --release --manifest-path kindle-to-obsidian/Cargo.toml
+lint:
+	docker compose run --rm dev cargo clippy -- -D warnings
 
-kindle-release:
-	docker compose build dev
-	docker compose run --rm dev cargo build --release --manifest-path kindle-to-obsidian/Cargo.toml
-	docker compose run --rm dev cargo build --release --manifest-path kindle-to-obsidian/Cargo.toml --target x86_64-pc-windows-gnu
-	mkdir -p dist
-	docker compose run --rm dev sh -c '\
-		cp /app/kindle-to-obsidian/target/release/kindle-to-obsidian /app/dist/kindle-to-obsidian && \
-		chmod +x /app/dist/kindle-to-obsidian && \
-		cp /app/kindle-to-obsidian/target/x86_64-pc-windows-gnu/release/kindle-to-obsidian.exe /app/dist/kindle-to-obsidian.exe'
+fmt:
+	docker compose run --rm dev cargo fmt
+
+fmt-check:
+	docker compose run --rm dev cargo fmt --check
+
+check:
+	docker compose run --rm dev cargo check

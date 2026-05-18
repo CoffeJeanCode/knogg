@@ -70,6 +70,9 @@ pub struct Agent {
     /// Context profile: caps how much of the brief this agent receives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<AgentProfile>,
+    /// Extra capabilities beyond the assigned role (ADR-0006).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
     pub outputs: AgentOutputs,
     #[serde(default)]
     pub mcp_servers: Vec<String>,

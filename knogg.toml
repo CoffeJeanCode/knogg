@@ -8,6 +8,6 @@ mcp_stdio = true
 watch = true
 
 [agents]
-codex_output = "AGENTS.md"
+opencode_output = "AGENTS.md"
 cursor_output = ".cursorrules"
 claude_output = ".claude/context.md"

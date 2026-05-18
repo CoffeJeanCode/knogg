@@ -1,17 +1,31 @@
-# agent roles: name -> { summary, responsibilities, constraints }
+# Three roles — one per active agent (claude, cursor, opencode)
 roles:
-  implementer:
-    summary: Writes and changes code to complete the active task.
+  architect:
+    summary: Plans work, reviews changes, and keeps vault context coherent.
     responsibilities:
-      - Implement the current focus task
-      - Add tests for new behavior
-      - Keep the build warning-free
+      - Break down the active task before implementation
+      - Review diffs for safety (paths, locks, proposals) and architecture fit
+      - Record ADRs via propose_decision; propose state updates when focus shifts
     constraints:
-      - Propose state changes, never mutate state directly
-  reviewer:
-    summary: Reviews proposed changes for correctness and safety.
+      - Recommend only — do not apply proposals or merge code
+      - Prefer reading vault (brief, architecture, decisions) before advising
+
+  builder:
+    summary: Implements and refactors product code in the IDE.
     responsibilities:
-      - Check that tests pass
-      - Flag security and path-safety issues
+      - Edit Rust in src/ for the current focus task
+      - Colocate unit tests with changed modules
+      - Keep changes minimal and aligned with style_guides.yml
     constraints:
-      - Do not apply proposals; recommend only
+      - Propose vault/state changes via MCP; never write active_context directly
+      - Do not run release builds unless the task requires it (delegate to executor)
+
+  executor:
+    summary: Runs CLI workflows, builds, tests, and knogg maintenance commands.
+    responsibilities:
+      - Run make test, make release, ./knogg doctor, ./knogg sync
+      - Execute multi-step or repo-wide commands from the project root
+      - Report command output back for architect review or builder follow-up
+    constraints:
+      - Do not redesign architecture or large refactors without architect handoff
+      - Use ./knogg wrapper; prefer dist/knogg when built

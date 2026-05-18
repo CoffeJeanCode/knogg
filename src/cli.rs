@@ -36,6 +36,9 @@ pub enum Commands {
         /// Vault path (overrides knogg.toml; defaults to ./.knogg).
         #[arg(long)]
         path: Option<String>,
+        /// Warn when staged proposals are still pending.
+        #[arg(long, default_value_t = true)]
+        pending_proposals: bool,
     },
     /// Generate a compact handoff prompt for an agent.
     Handoff {
@@ -51,6 +54,17 @@ pub enum Commands {
         /// Write the prompt to this file (parent dirs are created).
         #[arg(long)]
         save: Option<String>,
+        /// Auto-fill handoff.summary in active_context when empty.
+        #[arg(long)]
+        fill_summary: bool,
+    },
+    /// Agent message log (structured coordination).
+    Messages {
+        /// Vault path (overrides knogg.toml; defaults to ./.knogg).
+        #[arg(long)]
+        path: Option<String>,
+        #[command(subcommand)]
+        action: MessageAction,
     },
     /// Generate tool-specific config files from templates.
     Sync {
@@ -132,6 +146,62 @@ pub enum Commands {
         #[arg(long)]
         path: Option<String>,
     },
+    /// Partitioned tasks in plans/master_plan.yml.
+    Task {
+        /// Vault path (overrides knogg.toml; defaults to ./.knogg).
+        #[arg(long)]
+        path: Option<String>,
+        #[command(subcommand)]
+        action: TaskAction,
+    },
+    /// Coding conventions from `core/style_guides.yml`.
+    Style {
+        /// Vault path (overrides knogg.toml; defaults to ./.knogg).
+        #[arg(long)]
+        path: Option<String>,
+        #[command(subcommand)]
+        action: StyleAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskAction {
+    /// List structured tasks in the master plan.
+    List,
+    /// Claim a task (status → in_progress).
+    Claim {
+        /// Task id, e.g. 7A.
+        id: String,
+        /// Agent claiming the task.
+        #[arg(long)]
+        agent: String,
+    },
+    /// Release a task (status → done).
+    Release {
+        /// Task id.
+        id: String,
+        /// Agent releasing the task.
+        #[arg(long)]
+        agent: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum StyleAction {
+    /// List languages with style guides in the vault.
+    List,
+    /// Show rules for one language.
+    Show {
+        /// Language id (e.g. rust).
+        #[arg(long)]
+        lang: String,
+    },
+    /// Check conventions (module docs, optional rustfmt).
+    Doctor {
+        /// Run `cargo fmt --check` when Cargo.toml is present.
+        #[arg(long)]
+        check_fmt: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -161,20 +231,66 @@ pub enum StateAction {
 pub enum ProposalAction {
     /// List all proposals.
     List,
-    /// Show a proposal by id.
+    /// Show one or more proposals by id (read-only).
     Show {
-        /// Proposal id, e.g. PROP-0001.
-        id: String,
+        /// Proposal ids, e.g. PROP-0001 PROP-0002.
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
     },
-    /// Apply a pending proposal.
+    /// Apply pending proposal(s). Best-effort batch — not atomic; each id is independent.
     Apply {
-        /// Proposal id, e.g. PROP-0001.
-        id: String,
+        /// Proposal ids, e.g. PROP-0001 PROP-0002.
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
     },
-    /// Reject a pending proposal.
+    /// Reject pending proposal(s). Best-effort batch — not atomic.
     Reject {
-        /// Proposal id, e.g. PROP-0001.
-        id: String,
+        /// Proposal ids, e.g. PROP-0001 PROP-0002.
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
+    /// Remove terminal proposals (applied/rejected).
+    Gc {
+        /// Statuses to reap (repeatable; default: applied, rejected).
+        #[arg(long = "status")]
+        statuses: Vec<String>,
+        /// Keep at most N files per status (oldest removed first).
+        #[arg(long)]
+        keep: Option<usize>,
+        /// Only GC proposals tagged with this project name.
+        #[arg(long)]
+        project: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MessageAction {
+    /// List messages with optional filters.
+    List {
+        /// Filter by sender.
+        #[arg(long)]
+        from: Option<String>,
+        /// Filter by recipient (includes broadcast messages).
+        #[arg(long)]
+        to: Option<String>,
+        /// Filter by status (open, acked, closed).
+        #[arg(long)]
+        status: Option<String>,
+        /// Messages not yet read by this agent.
+        #[arg(long)]
+        unread_for: Option<String>,
+        /// Maximum number of messages (newest last).
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Mark message(s) read/acked by an agent. Best-effort batch — not atomic.
+    Ack {
+        /// Message ids, e.g. MSG-0001 MSG-0002.
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+        /// Agent acknowledging the message(s).
+        #[arg(long)]
+        by: String,
     },
 }
 
@@ -318,5 +434,14 @@ pub enum DecisionAction {
         /// Scope of the decision.
         #[arg(long, default_value = "global")]
         scope: String,
+    },
+    /// Update status on existing ADR(s). Best-effort batch — not atomic.
+    SetStatus {
+        /// ADR ids, e.g. ADR-0005 ADR-0006.
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+        /// New status (proposed, accepted, rejected, superseded).
+        #[arg(long)]
+        status: String,
     },
 }
