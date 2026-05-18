@@ -1,0 +1,28 @@
+# Key source directories (knogg Rust CLI)
+directories:
+  - path: src/
+    purpose: Rust application source (cli, commands, core, mcp)
+  - path: src/cli.rs
+    purpose: Clap CLI definitions and subcommand enums
+  - path: src/main.rs
+    purpose: Entry point; dispatches commands and loads knogg.toml
+  - path: src/commands/
+    purpose: Command implementations (state, sync, handoff, agents, brief, hooks, …)
+  - path: src/core/
+    purpose: Vault I/O, config resolution, locking, atomic writes
+  - path: src/mcp/
+    purpose: JSON-RPC MCP server over stdio
+  - path: .knogg/
+    purpose: Vault — single source of truth for agent context (not application runtime data)
+  - path: .knogg/core/
+    purpose: Stable project knowledge (index, architecture, style)
+  - path: .knogg/state/
+    purpose: Changing state (active_context, brief, decisions, proposals)
+  - path: .knogg/plans/
+    purpose: Master plan, tool registry, agent registry, roles, hooks
+  - path: .knogg/adapters/
+    purpose: Minijinja handoff templates per agent (cursor, claude, codex)
+  - path: dist/
+    purpose: Release binaries (./dist/knogg, knogg.exe) from make release
+  - path: docker-compose.yml
+    purpose: Dev container for cargo build/test without local Rust
