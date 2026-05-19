@@ -601,4 +601,4 @@ make release    # build binaries
 
 ## License
 
-APACHE 2.0 — see [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE) and https://www.apache.org/licenses/LICENSE-2.0.

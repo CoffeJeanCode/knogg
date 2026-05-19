@@ -160,4 +160,4 @@ Include: knogg version, Docker version, OS, and steps to reproduce (for bugs).
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
