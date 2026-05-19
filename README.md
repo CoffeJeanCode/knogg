@@ -3,7 +3,7 @@
 **Agent context broker** — a small Rust CLI that keeps a local context store for AI coding agents and brokers that context between tools (Cursor, Claude Code, Codex). Multiple agents and humans share one source of truth for *what is being worked on*, *what was decided*, and *what to do next* — without corrupting files or stepping on each other.
 
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
+[![License](https://img.shields.io/badge/License-APACHE2.0-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-first-2496ED?logo=docker)](docker-compose.yml)
 [![MCP](https://img.shields.io/badge/MCP-stdio-black)](README.md#6-mcp-server-for-ai-agents)
 
