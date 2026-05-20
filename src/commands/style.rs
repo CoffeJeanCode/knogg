@@ -279,7 +279,8 @@ pub fn cmd_doctor(path: &str, check_fmt: bool) -> Result<()> {
 }
 
 /// Compact JSON-friendly export for MCP.
-pub fn guides_json(root: &Path) -> Result<serde_json::Value> {
+#[cfg(test)]
+fn guides_json(root: &Path) -> Result<serde_json::Value> {
     let doc = load(root)?;
     serde_json::to_value(&doc).map_err(|e| anyhow!("serializing style guides: {e}"))
 }

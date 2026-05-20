@@ -4,8 +4,10 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/License-APACHE2.0-blue)](LICENSE)
+[![Version](https://img.shields.io/github/v/release/jeanpierre/knogg?label=version)](https://github.com/jeanpierre/knogg/releases)
 [![Docker](https://img.shields.io/badge/Docker-first-2496ED?logo=docker)](docker-compose.yml)
 [![MCP](https://img.shields.io/badge/MCP-stdio-black)](README.md#6-mcp-server-for-ai-agents)
+[![Mesh](https://img.shields.io/badge/Mesh-federation-7B61FF)](README.md#knogg-mesh)
 
 ## Features
 
@@ -18,6 +20,7 @@
 | **MCP server** | JSON-RPC over stdio — agents read context and stage changes programmatically |
 | **Template sync** | Generate `.cursorrules`, `AGENTS.md`, `.claude/context.md` from templates |
 | **Reactive watch** | Auto-re-sync when the active context changes |
+| **Mesh federation** | Cross-project agent communication via TCP hub (`knogg hub`) |
 
 ## Quick Start
 
@@ -45,6 +48,7 @@ make release            # → ./dist/knogg + ./dist/knogg.exe
 - [Command Reference](#command-reference)
 - [MCP Server](#mcp-server)
 - [Workflows](#workflows)
+- [Knogg Mesh](#knogg-mesh)
 - [Safety Guarantees](#safety-guarantees)
 - [Configuration](#configuration)
 - [Project Structure](#project-structure)
@@ -55,12 +59,56 @@ make release            # → ./dist/knogg + ./dist/knogg.exe
 
 ## Installation
 
+### Quick Install (Recommended)
+
+Download the latest release binary — no source code needed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jeanpierre/knogg/main/scripts/install.sh | bash
+```
+
+Or with a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jeanpierre/knogg/main/scripts/install.sh | bash
+```
+
+Set a custom install directory:
+
+```bash
+KNOGG_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/jeanpierre/knogg/main/scripts/install.sh | bash
+```
+
+### Download from GitHub Releases
+
+Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows:
+
+**https://github.com/jeanpierre/knogg/releases**
+
+| Platform | Asset |
+|----------|-------|
+| Linux x86_64 | `knogg-linux-amd64` |
+| macOS Intel | `knogg-macos-amd64` |
+| macOS Apple Silicon | `knogg-macos-arm64` |
+| Windows x86_64 | `knogg-windows-amd64.exe` |
+
+Download, make executable, and run:
+
+```bash
+# Linux / macOS
+curl -LO https://github.com/jeanpierre/knogg/releases/latest/download/knogg-linux-amd64
+chmod +x knogg-linux-amd64
+sudo mv knogg-linux-amd64 /usr/local/bin/knogg
+
+# Windows — download knogg-windows-amd64.exe and add to PATH
+```
+
 ### Prerequisites
 
-- **Docker** (Compose v2) — the only runtime dependency
-- No local Rust toolchain required
+- **Docker** (Compose v2) — only required for building from source
+- No local Rust toolchain required for runtime
 
-### Build
+### Build from Source
 
 ```bash
 # Full release: Unix + Windows cross-compiled into ./dist
@@ -307,6 +355,17 @@ knogg task claim 7A --agent cursor           # claim a task
 knogg task release 7A --agent cursor         # release (mark done)
 ```
 
+### `knogg hub`
+
+Start the Knogg Hub — a TCP router for cross-project agent communication.
+
+```bash
+knogg hub                  # default port 5050
+knogg hub --port 6060      # custom port
+```
+
+The hub routes queries between projects connected via `KNOGG_HUB_URL`.
+
 ### `knogg style …`
 
 Manage coding conventions from `core/style_guides.yml`.
@@ -348,6 +407,7 @@ knogg watch
 | `knogg hooks list/run/enable/disable` | Event-driven hooks |
 | `knogg brief refresh/show/doctor` | Compact project brief |
 | `knogg task list/claim/release` | Partitioned task management |
+| `knogg hub [--port]` | Start the federation hub for cross-project communication |
 | `knogg style list/show/doctor` | Coding conventions |
 | `knogg mcp` | Run the MCP server (JSON-RPC over stdio) |
 | `knogg watch` | Re-run `sync` when the active context changes |
@@ -485,6 +545,75 @@ knogg watch
 # Terminal 2 — any state change triggers `sync` automatically
 knogg state set --status done
 ```
+
+---
+
+## Knogg Mesh
+
+Mesh enables **cross-project agent communication** — agents in one project can query the vault of another project through a central hub.
+
+### Architecture
+
+```
+Project A (knogg) ──┐
+                    ├──→ Knogg Hub (TCP) ←── Project B (knogg)
+Project C (knogg) ──┘
+```
+
+Each project connects to the hub as a registered peer. Agents use the `query_mesh` MCP tool to read context from other projects.
+
+### Start the Hub
+
+```bash
+knogg hub                  # listen on port 5050
+knogg hub --port 6060      # custom port
+```
+
+Or via Docker:
+
+```bash
+docker compose run --rm -p 5050:5050 dev cargo run -- hub --port 5050
+```
+
+### Connect a Project
+
+Set environment variables before running knogg:
+
+```bash
+export KNOGG_HUB_URL="tcp://localhost:5050"
+export KNOGG_PROJECT="my-project"   # optional — defaults to directory name
+knogg status                        # auto-connects on first command
+```
+
+### Query Another Project
+
+Agents use the `query_mesh` MCP tool:
+
+```json
+{
+  "method": "query_mesh",
+  "params": {
+    "target_project": "other-project",
+    "query": "get_active_context",
+    "args": {}
+  }
+}
+```
+
+Supported queries: `get_active_context`, `read_vault`, `list_vault`, `search_vault`.
+
+### List Connected Peers
+
+```bash
+# Via mesh client (from any connected project)
+knogg mesh list-peers
+```
+
+### Use Cases
+
+- **Multi-repo coordination** — agents working across frontend/backend repos share context
+- **Monorepo sub-projects** — each package has its own `.knogg/` but agents see the full picture
+- **Cross-team visibility** — team A checks team B's active tasks without leaving their project
 
 ---
 

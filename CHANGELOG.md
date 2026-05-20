@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-05-19
+
+### Added
+- **Knogg Mesh — Federation Layer** — cross-project agent communication via TCP hub
+- `knogg hub` — central router for multi-project mesh (`knogg hub --port 5050`)
+- `query_mesh` MCP tool — agents query other projects' vaults through the hub
+- `MeshClient` — TCP client with register/query/list-peers; auto-connects via `KNOGG_HUB_URL`
+- Hub service in `docker-compose.yml` for easy local mesh testing
+
+### Changed
+- MCP server dispatches mesh queries to internal `call_tool_pub` for vault reads
+
 ## [1.0.1] — 2026-05-18
 
 ### Added

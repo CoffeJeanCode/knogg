@@ -142,15 +142,6 @@ fn ack_message(log: &mut MessageLog, id: &str, by: &str) -> Result<()> {
     Ok(())
 }
 
-/// Mark a message read/acked by `by`.
-pub fn ack(root: &Path, id: &str, by: &str) -> Result<()> {
-    let _lock = VaultLock::acquire(root)?;
-    let mut log = load(root)?;
-    ack_message(&mut log, id, by)?;
-    write_log(root, &log)?;
-    Ok(())
-}
-
 /// Ack many messages under one lock. Best-effort — not atomic.
 pub fn ack_many(root: &Path, ids: &[String], by: &str) -> Result<Vec<(String, Result<()>)>> {
     let _lock = VaultLock::acquire(root)?;
@@ -339,7 +330,7 @@ mod tests {
         .unwrap();
         assert_eq!(id, "MSG-0001");
 
-        ack(&root, &id, "cursor").unwrap();
+        ack_many(&root, &[id.clone()], "cursor").unwrap();
         let v = filtered_json(
             &root,
             &MessageFilter {

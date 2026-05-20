@@ -159,6 +159,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: TaskAction,
     },
+    /// Start the Knogg Hub — central router for cross-project agent communication.
+    Hub {
+        /// TCP port to listen on.
+        #[arg(long, default_value_t = 5050)]
+        port: u16,
+    },
     /// Coding conventions from `core/style_guides.yml`.
     Style {
         /// Vault path (overrides knogg.toml; defaults to ./.knogg).

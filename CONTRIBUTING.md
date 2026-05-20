@@ -110,6 +110,32 @@ The `.knogg/` directory is the project's context store. Key conventions:
 5. Add MCP tool registration in `src/mcp/mod.rs` (if applicable)
 6. Write unit tests in the same file under `#[cfg(test)]`
 
+### Mesh / Hub Development
+
+The mesh layer (`src/mesh.rs`) enables cross-project agent communication:
+
+- **Hub** (`src/commands/hub.rs`) — TCP router that forwards queries between registered projects
+- **MeshClient** (`src/mesh.rs`) — TCP client with register/query/list-peers; auto-connects via `KNOGG_HUB_URL`
+
+To test locally:
+
+```bash
+# Terminal 1 — start the hub
+knogg hub --port 5050
+
+# Terminal 2 — project A
+KNOGG_HUB_URL=tcp://localhost:5050 KNOGG_PROJECT=project-a knogg status
+
+# Terminal 3 — project B
+KNOGG_HUB_URL=tcp://localhost:5050 KNOGG_PROJECT=project-b knogg status
+```
+
+Or via Docker:
+
+```bash
+docker compose run --rm -p 5050:5050 dev cargo run -- hub --port 5050
+```
+
 ## Pull Request Process
 
 1. **Branch**: Create a feature branch from `main`

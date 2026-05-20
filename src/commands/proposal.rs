@@ -195,6 +195,7 @@ pub fn create_with_policy(
 }
 
 /// Create a new pending proposal; returns its id (no auto-apply).
+#[cfg(test)]
 pub fn create(root: &Path, target: &str, patch_json: &JsonValue, reason: &str) -> Result<String> {
     Ok(create_with_policy(root, target, patch_json, reason, false)?.proposal_id)
 }

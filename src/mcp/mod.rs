@@ -10,9 +10,16 @@ use crate::core::vault::{audit_patch, resolve_path, safe_vault_path};
 /// MCP protocol version this server speaks.
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
+/// Expose `call_tool` for the mesh client (incoming cross-project queries).
+pub fn call_tool_pub(root: &Path, name: &str, params: &Value) -> Result<Value> {
+    call_tool(root, name, params)
+}
+
 /// `knogg mcp`: serve the MCP tools over JSON-RPC on stdio.
 pub fn serve(path: &str) -> Result<()> {
     let root = resolve_path(path)?;
+    // Connect to hub if KNOGG_HUB_URL is set — non-fatal if hub is unavailable.
+    crate::mesh::init_from_env(root.clone());
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
 
@@ -119,6 +126,16 @@ fn tools_list() -> Value {
         {"name": "audit_commit",
          "description": "Apply a staged proposal by id",
          "inputSchema": obj(json!({"id": {"type": "string"}}), json!(["id"]))},
+        {"name": "query_mesh",
+         "description": "Query another project's vault via the Knogg Hub (requires KNOGG_HUB_URL env var)",
+         "inputSchema": obj(
+            json!({
+                "target_project": {"type": "string"},
+                "query": {"type": "string",
+                          "enum": ["get_active_context","read_vault","list_vault","search_vault"]},
+                "args": {"type": "object"},
+            }),
+            json!(["target_project", "query"]))},
         {"name": "messages",
          "description": "List open inbox or post a message (action=list|post)",
          "inputSchema": json!({"type": "object",
@@ -220,6 +237,13 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             Ok(json!({"committed": true, "proposal_id": id}))
         }
         "messages" => messages_tool(root, params),
+        "query_mesh" => {
+            let target = str_param(params, "target_project")?;
+            let query = str_param(params, "query")?;
+            let args = params.get("args").cloned().unwrap_or(json!({}));
+            crate::mesh::with_client(|c| c.query(target, query, &args))
+                .ok_or_else(|| anyhow!("KNOGG_HUB_URL not set — hub not connected"))?
+        }
         // Legacy tool names → helpful errors after v1 prune.
         legacy if is_legacy_tool(legacy) => {
             bail!("tool '{legacy}' removed in v1 MCP surface — use get_active_context, messages, or CLI")
@@ -591,9 +615,10 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 8);
+        assert_eq!(names.len(), 9);
         assert!(names.contains(&"get_active_context"));
         assert!(names.contains(&"messages"));
+        assert!(names.contains(&"query_mesh"));
     }
 
     #[test]

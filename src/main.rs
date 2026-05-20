@@ -2,6 +2,7 @@ mod cli;
 mod commands;
 mod core;
 mod mcp;
+mod mesh;
 
 use clap::Parser;
 use cli::{Cli, Commands, DecisionAction, MessageAction, ProposalAction, StateAction, TaskAction};
@@ -167,6 +168,9 @@ fn main() -> anyhow::Result<()> {
                 BriefAction::Show => commands::brief::cmd_show(&p)?,
                 BriefAction::Doctor => commands::brief::cmd_doctor(&p)?,
             }
+        }
+        Commands::Hub { port } => {
+            commands::hub::serve(port)?;
         }
         Commands::Mcp { path } => {
             mcp::serve(&resolve(path))?;

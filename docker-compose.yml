@@ -22,6 +22,19 @@ services:
       - .:/workspace
     entrypoint: ["knogg"]
 
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "5050:5050"
+    entrypoint: ["cargo", "run", "--", "hub", "--port", "5050"]
+    environment:
+      - RUST_BACKTRACE=1
+
 volumes:
   cargo-cache:
   target-cache:

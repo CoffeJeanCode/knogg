@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod hub;
 pub mod brief;
 pub mod decision;
 pub mod doctor;
