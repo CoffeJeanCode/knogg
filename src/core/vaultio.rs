@@ -12,61 +12,126 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 
-/// Default time to wait for the vault lock before giving up.
-pub const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+/// Wait up to 15s for a held lock (Stage 13).
+pub const LOCK_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Polling interval while waiting for the lock.
+/// Polling interval while waiting.
 const LOCK_RETRY: Duration = Duration::from_millis(50);
 
-/// Lock file name, created inside the vault root.
+/// Stale-lock threshold: after this age, locks held by dead PIDs are reclaimed.
+const STALE_AGE: Duration = Duration::from_secs(30);
+
+/// Global vault lock file (kept for backward compatibility).
 const LOCK_FILE: &str = ".lock";
 
-/// RAII guard for the global vault lock. The lock file is removed on drop, so
-/// the lock is always released even on early return.
+/// JSON metadata persisted inside a lock file.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct LockMeta {
+    pid: u32,
+    owner: String,
+    timestamp: u64,
+    intent: String,
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Best-effort liveness probe: signal 0 to `pid`. Linux/macOS only; on Windows
+/// assume the PID is alive (no recovery on that platform).
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    if pid == 0 { return false; }
+    // SAFETY: kill(pid, 0) only checks for existence; no signal is delivered.
+    unsafe { libc::kill(pid as i32, 0) == 0 || *libc::__errno_location() != libc::ESRCH }
+}
+#[cfg(not(unix))]
+fn pid_alive(_pid: u32) -> bool { true }
+
+fn write_meta(path: &Path, intent: &str) -> Result<()> {
+    let meta = LockMeta {
+        pid: std::process::id(),
+        owner: std::env::var("KNOGG_AGENT").unwrap_or_else(|_| "knogg".into()),
+        timestamp: unix_now(),
+        intent: intent.to_string(),
+    };
+    let bytes = serde_json::to_vec_pretty(&meta)?;
+    let mut f = OpenOptions::new().write(true).create_new(true).open(path)?;
+    f.write_all(&bytes)?;
+    Ok(())
+}
+
+fn read_meta(path: &Path) -> Option<LockMeta> {
+    let s = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&s).ok()
+}
+
+/// Best-effort: reclaim a lock file if its owner is dead OR it's stale.
+/// Returns true if the lock was removed (caller can retry create_new).
+fn try_reclaim(path: &Path) -> bool {
+    let Some(meta) = read_meta(path) else { return false; };
+    let age = unix_now().saturating_sub(meta.timestamp);
+    if age > STALE_AGE.as_secs() && !pid_alive(meta.pid) {
+        eprintln!(
+            "[lock] reclaiming stale lock {} (pid={} dead, age={}s)",
+            path.display(), meta.pid, age
+        );
+        let _ = fs::remove_file(path);
+        return true;
+    }
+    false
+}
+
+fn acquire_path(lock_path: &Path, timeout: Duration, intent: &str) -> Result<()> {
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("creating lock dir {}", parent.display()))?;
+    }
+    let deadline = Instant::now() + timeout;
+    let mut reclaimed = false;
+    loop {
+        match write_meta(lock_path, intent) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let is_exists = e.downcast_ref::<std::io::Error>()
+                    .map(|ioe| ioe.kind() == std::io::ErrorKind::AlreadyExists)
+                    .unwrap_or(false);
+                if !is_exists {
+                    return Err(anyhow!("acquiring lock {}: {e}", lock_path.display()));
+                }
+                if !reclaimed && try_reclaim(lock_path) {
+                    reclaimed = true;
+                    continue;
+                }
+                if Instant::now() >= deadline {
+                    let meta = read_meta(lock_path);
+                    bail!(
+                        "lock held: {} ({:?}); use `knogg unlock --file <path>` if owner is dead",
+                        lock_path.display(), meta
+                    );
+                }
+                sleep(LOCK_RETRY);
+            }
+        }
+    }
+}
+
+/// RAII guard for the global vault lock.
 pub struct VaultLock {
     lock_path: PathBuf,
 }
 
 impl VaultLock {
-    /// Acquire the exclusive vault lock, waiting up to [`LOCK_TIMEOUT`].
     pub fn acquire(vault_root: &Path) -> Result<VaultLock> {
         Self::acquire_with_timeout(vault_root, LOCK_TIMEOUT)
     }
 
-    /// Acquire the lock, waiting up to `timeout`.
-    ///
-    /// The lock is a `.lock` file created with `create_new`, which is an
-    /// atomic "exists?" test. A timeout (never an infinite wait) avoids
-    /// deadlocks if a previous holder crashed without cleaning up.
     pub fn acquire_with_timeout(vault_root: &Path, timeout: Duration) -> Result<VaultLock> {
         fs::create_dir_all(vault_root)
             .with_context(|| format!("creating vault root {}", vault_root.display()))?;
         let lock_path = vault_root.join(LOCK_FILE);
-        let deadline = Instant::now() + timeout;
-
-        loop {
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock_path)
-            {
-                Ok(mut f) => {
-                    let _ = writeln!(f, "locked by pid {}", std::process::id());
-                    return Ok(VaultLock { lock_path });
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if Instant::now() >= deadline {
-                        bail!(
-                            "vault is locked by another process: {} \
-                             (remove this file if no process is running)",
-                            lock_path.display()
-                        );
-                    }
-                    sleep(LOCK_RETRY);
-                }
-                Err(e) => return Err(anyhow!("acquiring vault lock: {e}")),
-            }
-        }
+        acquire_path(&lock_path, timeout, "vault-global")?;
+        Ok(VaultLock { lock_path })
     }
 }
 
@@ -74,6 +139,32 @@ impl Drop for VaultLock {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.lock_path);
     }
+}
+
+/// Per-file granular lock: `<file>.lock` next to the target.
+pub struct FileLock {
+    lock_path: PathBuf,
+}
+
+impl FileLock {
+    /// Acquire a granular lock for `target`. `intent` is recorded in metadata.
+    pub fn acquire(target: &Path, intent: &str) -> Result<FileLock> {
+        let lock_path = lock_path_for(target);
+        acquire_path(&lock_path, LOCK_TIMEOUT, intent)?;
+        Ok(FileLock { lock_path })
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.lock_path);
+    }
+}
+
+pub fn lock_path_for(target: &Path) -> PathBuf {
+    let mut p = target.as_os_str().to_owned();
+    p.push(".lock");
+    PathBuf::from(p)
 }
 
 /// Atomically write `content` to `path`.
@@ -228,7 +319,7 @@ mod tests {
         let err = VaultLock::acquire_with_timeout(&root, Duration::from_millis(200))
             .err()
             .expect("second lock must fail");
-        assert!(err.to_string().contains("locked by another process"));
+        assert!(err.to_string().contains("lock held"));
 
         drop(held);
         fs::remove_dir_all(&root).ok();

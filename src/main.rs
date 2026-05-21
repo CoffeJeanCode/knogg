@@ -172,6 +172,22 @@ fn main() -> anyhow::Result<()> {
         Commands::Hub { port } => {
             commands::hub::serve(port)?;
         }
+        Commands::Serve { port } => {
+            let root = resolve(None);
+            crate::mesh::init_pool(&cfg.mesh);
+            if let Some(lp) = cfg.mesh.listen_port {
+                if lp != port {
+                    eprintln!("[mesh] note: listen_port {} != serve port {}", lp, port);
+                }
+            }
+            let vault_root = std::path::PathBuf::from(&root);
+            tokio::runtime::Runtime::new()?.block_on(async {
+                crate::mesh::serve::serve(crate::mesh::serve::ServeConfig {
+                    vault_root,
+                    port,
+                }).await
+            })?;
+        }
         Commands::Mcp { path } => {
             mcp::serve(&resolve(path))?;
         }
@@ -187,6 +203,19 @@ fn main() -> anyhow::Result<()> {
                     commands::plan::cmd_release(&p, &id, &agent)?;
                 }
             }
+        }
+        Commands::Unlock { path, all, file } => {
+            let p = resolve(path);
+            if all {
+                commands::unlock::unlock_all(&p)?;
+            } else if let Some(f) = file {
+                commands::unlock::unlock_file(&p, &f)?;
+            } else {
+                anyhow::bail!("specify --all or --file <path>");
+            }
+        }
+        Commands::Gc { path, dry_run } => {
+            commands::gc::run(&resolve(path), dry_run)?;
         }
         Commands::Style { path, action } => {
             let p = resolve(path);

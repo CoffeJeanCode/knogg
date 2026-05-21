@@ -4,7 +4,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/License-APACHE2.0-blue)](LICENSE)
-[![Version](https://img.shields.io/github/v/release/jeanpierre/knogg?label=version)](https://github.com/jeanpierre/knogg/releases)
+[![Version](https://img.shields.io/github/v/release/CoffeJeanCode/knogg?label=version)](https://github.com/CoffeJeanCode/knogg/releases)
 [![Docker](https://img.shields.io/badge/Docker-first-2496ED?logo=docker)](docker-compose.yml)
 [![MCP](https://img.shields.io/badge/MCP-stdio-black)](README.md#6-mcp-server-for-ai-agents)
 [![Mesh](https://img.shields.io/badge/Mesh-federation-7B61FF)](README.md#knogg-mesh)
@@ -21,6 +21,10 @@
 | **Template sync** | Generate `.cursorrules`, `AGENTS.md`, `.claude/context.md` from templates |
 | **Reactive watch** | Auto-re-sync when the active context changes |
 | **Mesh federation** | Cross-project agent communication via TCP hub (`knogg hub`) |
+| **P2P peering** | Direct peer-to-peer connections via `knogg.toml [mesh.peers]` — no hub needed |
+| **Event subscriptions** | Cross-repo state change propagation |
+| **Stale lock reclamation** | Dead-PID detection + auto-reclaim after 30s |
+| **Schema migrations** | Transparent vault YAML upgrades on read |
 
 ## Quick Start
 
@@ -64,26 +68,26 @@ make release            # → ./dist/knogg + ./dist/knogg.exe
 Download the latest release binary — no source code needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jeanpierre/knogg/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.sh | bash
 ```
 
 Or with a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jeanpierre/knogg/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.sh | bash
 ```
 
 Set a custom install directory:
 
 ```bash
-KNOGG_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/jeanpierre/knogg/main/scripts/install.sh | bash
+KNOGG_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.sh | bash
 ```
 
 ### Download from GitHub Releases
 
 Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows:
 
-**https://github.com/jeanpierre/knogg/releases**
+**https://github.com/CoffeJeanCode/knogg/releases**
 
 | Platform | Asset |
 |----------|-------|
@@ -96,11 +100,13 @@ Download, make executable, and run:
 
 ```bash
 # Linux / macOS
-curl -LO https://github.com/jeanpierre/knogg/releases/latest/download/knogg-linux-amd64
+curl -LO https://github.com/CoffeJeanCode/knogg/releases/latest/download/knogg-linux-amd64
 chmod +x knogg-linux-amd64
 sudo mv knogg-linux-amd64 /usr/local/bin/knogg
 
-# Windows — download knogg-windows-amd64.exe and add to PATH
+# Windows (PowerShell as Administrator)
+irm https://github.com/CoffeJeanCode/knogg/releases/latest/download/knogg-windows-amd64.exe -o $env:LOCALAPPDATA\knogg.exe
+# Add $env:LOCALAPPDATA to your PATH, then: knogg.exe init
 ```
 
 ### Prerequisites
@@ -366,6 +372,35 @@ knogg hub --port 6060      # custom port
 
 The hub routes queries between projects connected via `KNOGG_HUB_URL`.
 
+### `knogg serve`
+
+Start a read-only TCP JSON-RPC server for P2P peering.
+
+```bash
+knogg serve                 # default port 5051
+knogg serve --port 6060     # custom port
+```
+
+Auto-connects to peers declared in `knogg.toml [mesh.peers]`. Supports `query_peer` and `subscribe_to_task` MCP tools.
+
+### `knogg unlock`
+
+Clear stale vault lock files (manual — lock auto-reclaims after 30s).
+
+```bash
+knogg unlock --all                           # clear all lock files
+knogg unlock --file state/active_context.yml  # clear one lock
+```
+
+### `knogg gc`
+
+Reclaim disk space: purge old backups + terminal proposals.
+
+```bash
+knogg gc                    # dry-run by default
+knogg gc --dry-run          # show what would be deleted
+```
+
 ### `knogg style …`
 
 Manage coding conventions from `core/style_guides.yml`.
@@ -408,6 +443,9 @@ knogg watch
 | `knogg brief refresh/show/doctor` | Compact project brief |
 | `knogg task list/claim/release` | Partitioned task management |
 | `knogg hub [--port]` | Start the federation hub for cross-project communication |
+| `knogg serve [--port]` | Start a P2P TCP JSON-RPC server with peer connections |
+| `knogg unlock --all/--file` | Clear stale vault lock files |
+| `knogg gc [--dry-run]` | Reclaim disk space (old backups + terminal proposals) |
 | `knogg style list/show/doctor` | Coding conventions |
 | `knogg mcp` | Run the MCP server (JSON-RPC over stdio) |
 | `knogg watch` | Re-run `sync` when the active context changes |
@@ -615,18 +653,121 @@ knogg mesh list-peers
 - **Monorepo sub-projects** — each package has its own `.knogg/` but agents see the full picture
 - **Cross-team visibility** — team A checks team B's active tasks without leaving their project
 
+## P2P Mesh (Direct Peering)
+
+P2P mesh replaces the hub with **direct TCP connections** between vaults. Each vault serves read-only JSON-RPC endpoints and connects to peers declared in `knogg.toml`.
+
+### Architecture
+
+```
+knogg serve --port 5051 ←→ knogg serve --port 5051
+   (frontend)                   (backend)
+        │                           │
+     .knogg/                     .knogg/
+```
+
+Each vault exposes its context via TCP. Peers auto-reconnect on failure.
+
+### Configuration
+
+Add to `knogg.toml`:
+
+```toml
+[mesh]
+listen_port = 5051
+
+[mesh.peers]
+backend = "tcp://localhost:5051"
+db = "tcp://localhost:5052"
+```
+
+### Start a P2P Node
+
+```bash
+# Terminal 1 — serve a vault
+knogg serve --port 5051
+
+# Terminal 2 — serve another vault
+cd /path/to/other-project
+knogg serve --port 5052
+```
+
+### Query a Peer via MCP
+
+Agents use `query_peer` MCP tool:
+
+```json
+{
+  "method": "query_peer",
+  "params": {
+    "peer": "backend",
+    "method": "get_active_context",
+    "params": {}
+  }
+}
+```
+
+### Subscribe to Task Events
+
+Agents subscribe to task-done events from connected peers:
+
+```json
+{
+  "method": "subscribe_to_task",
+  "params": {
+    "peer": "backend",
+    "task_id": "API-Auth",
+    "from": "frontend-agent"
+  }
+}
+```
+
+When the peer marks that task done via `knogg state set --status done`, subscribed frontends receive a `task_done` event and trigger an automatic sync.
+
+---
+
+## Vault Maintenance
+
+### `knogg unlock`
+
+Manually clear stale lock files. Useful when a process crashes while holding a lock.
+
+```bash
+# Clear all lock files
+knogg unlock --all
+
+# Clear lock for a specific file
+knogg unlock --file state/active_context.yml
+```
+
+Locks with dead PIDs are auto-reclaimed after 30s — manual unlock is only needed in edge cases.
+
+### `knogg gc`
+
+Reclaim disk space by purging old backups and terminal proposals.
+
+```bash
+knogg gc                      # dry-run by default
+knogg gc --dry-run            # show what would be deleted
+```
+
+Rules:
+- `.knogg/backups/<stamp>/` dirs older than 7 days are removed entirely
+- `.knogg/state/proposals/<id>.yml` with `applied` or `rejected` status are deleted
+
 ---
 
 ## Safety Guarantees
 
 | Guarantee | Implementation |
 |-----------|----------------|
-| **Global lock** | `.knogg/.lock` — RAII, released on drop, 5s timeout |
+| **Global lock** | `.knogg/.lock` — RAII, released on drop, 15s timeout, stale-lock auto-reclaim |
 | **Atomic writes** | Temp file + rename — crash never leaves partial file |
 | **Backups** | `init --force` / `sync --force` back up changed files to `.knogg/backups/<timestamp>/` |
 | **Staged proposals** | Agents cannot mutate state directly; changes require human `apply` |
 | **Path boundaries** | `..` always rejected; MCP rejects absolute paths and vault escapes |
 | **Human files respected** | `sync` never overwrites a file without the generated-by marker unless `--force` |
+| **Stale lock reclamation** | Locks with dead PIDs reclaimed after 30s (`libc::kill(pid, 0)` liveness check) |
 
 ---
 

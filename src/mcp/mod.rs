@@ -38,7 +38,7 @@ pub fn serve(path: &str) -> Result<()> {
 }
 
 /// Parse one JSON-RPC line. Returns `None` for notifications (no `id`).
-fn dispatch_line(root: &Path, line: &str) -> Option<String> {
+pub fn dispatch_line(root: &Path, line: &str) -> Option<String> {
     let req: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
@@ -68,6 +68,49 @@ fn dispatch_line(root: &Path, line: &str) -> Option<String> {
 
 fn error_response(id: Value, code: i64, message: &str) -> String {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}).to_string()
+}
+
+/// Read-only tool surface exposed to P2P peers (Stage 9 constraint).
+pub const READ_ONLY_TOOLS: &[&str] = &[
+    "get_active_context",
+    "read_vault",
+    "list_vault",
+    "search_vault",
+    "get_tool_registry",
+];
+
+/// Read-only JSON-RPC dispatch for the P2P serve daemon.
+/// Rejects any method that could mutate the vault. Special server-side methods
+/// (e.g. `subscribe_to_task`) are NOT routed here — the serve loop handles
+/// them before calling this.
+pub fn dispatch_line_readonly(root: &Path, line: &str) -> Option<String> {
+    let req: Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(e) => return Some(error_response(Value::Null, -32700, &format!("parse error: {e}"))),
+    };
+    let id = req.get("id")?.clone();
+    let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+    let params = req.get("params").cloned().unwrap_or(json!({}));
+
+    let allowed = matches!(method, "initialize" | "tools/list")
+        || READ_ONLY_TOOLS.contains(&method)
+        || (method == "tools/call"
+            && params
+                .get("name")
+                .and_then(Value::as_str)
+                .map(|n| READ_ONLY_TOOLS.contains(&n))
+                .unwrap_or(false));
+
+    if !allowed {
+        return Some(error_response(id, -32601, &format!(
+            "method '{method}' not exposed over P2P (read-only surface)"
+        )));
+    }
+
+    Some(match handle(root, method, &params) {
+        Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string(),
+        Err(e) => error_response(id, -32000, &e.to_string()),
+    })
 }
 
 /// MCP `initialize` result.
@@ -136,6 +179,23 @@ fn tools_list() -> Value {
                 "args": {"type": "object"},
             }),
             json!(["target_project", "query"]))},
+        {"name": "query_peer",
+         "description": "Query a directly connected peer via P2P pool (knogg.toml [mesh.peers])",
+         "inputSchema": obj(
+            json!({
+                "peer": {"type": "string"},
+                "method": {"type": "string"},
+                "params": {"type": "object"},
+            }),
+            json!(["peer", "method"]))},
+        {"name": "subscribe_to_task",
+         "description": "Subscribe to task-done events from a peer (forwarded via P2P pool)",
+         "inputSchema": obj(
+            json!({
+                "peer": {"type": "string"},
+                "task_id": {"type": "string"},
+            }),
+            json!(["peer", "task_id"]))},
         {"name": "messages",
          "description": "List open inbox or post a message (action=list|post)",
          "inputSchema": json!({"type": "object",
@@ -243,6 +303,28 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             let args = params.get("args").cloned().unwrap_or(json!({}));
             crate::mesh::with_client(|c| c.query(target, query, &args))
                 .ok_or_else(|| anyhow!("KNOGG_HUB_URL not set — hub not connected"))?
+        }
+        "query_peer" => {
+            let peer = str_param(params, "peer")?;
+            let method = str_param(params, "method")?;
+            if !READ_ONLY_TOOLS.contains(&method) {
+                bail!("method '{method}' not allowed via query_peer (read-only surface)");
+            }
+            let args = params.get("params").cloned().unwrap_or(json!({}));
+            crate::mesh::with_pool(|p| p.query(peer, method, &args))
+                .ok_or_else(|| anyhow!("peer pool not initialized"))?
+        }
+        "subscribe_to_task" => {
+            let peer = str_param(params, "peer")?;
+            let task_id = str_param(params, "task_id")?.to_string();
+            let pool = crate::mesh::pool_handle()
+                .ok_or_else(|| anyhow!("peer pool not initialized"))?;
+            let tid = task_id.clone();
+            pool.subscribe(peer, &task_id, move |evt| {
+                eprintln!("[mesh:events] task_done received: {} → {}",
+                    tid, evt);
+            })?;
+            Ok(json!({"subscribed": true, "task_id": task_id, "peer": peer}))
         }
         // Legacy tool names → helpful errors after v1 prune.
         legacy if is_legacy_tool(legacy) => {
@@ -615,10 +697,12 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 9);
+        assert_eq!(names.len(), 11);
         assert!(names.contains(&"get_active_context"));
         assert!(names.contains(&"messages"));
         assert!(names.contains(&"query_mesh"));
+        assert!(names.contains(&"query_peer"));
+        assert!(names.contains(&"subscribe_to_task"));
     }
 
     #[test]

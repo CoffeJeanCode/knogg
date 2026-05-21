@@ -45,7 +45,10 @@ pub fn set(
             ctx.focus.task = t;
         }
         if let Some(s) = status {
-            ctx.focus.status = s;
+            ctx.focus.status = s.clone();
+            if s == "done" && !ctx.focus.task.is_empty() {
+                crate::mesh::events::emit_task_done(&ctx.focus.task, "human");
+            }
         }
         write_active_context(&root, &ctx)?;
     }

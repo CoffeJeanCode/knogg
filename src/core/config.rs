@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 
 use anyhow::{Context, Result};
@@ -17,6 +18,8 @@ pub struct Config {
     pub knogg: KnoggSection,
     #[serde(default)]
     pub proposals: ProposalsSection,
+    #[serde(default)]
+    pub mesh: MeshSection,
 }
 
 /// Proposal policy from `knogg.toml` (ADR-0011).
@@ -33,6 +36,16 @@ pub struct KnoggSection {
     pub path: Option<String>,
     /// Marker prepended to generated files.
     pub generated_marker: Option<String>,
+}
+
+/// P2P mesh section — declarative static peer topology.
+#[derive(Debug, Default, Deserialize)]
+pub struct MeshSection {
+    /// TCP port to listen on for P2P serve.
+    pub listen_port: Option<u16>,
+    /// Static peer list: name → address.
+    #[serde(default)]
+    pub peers: HashMap<String, String>,
 }
 
 impl Config {
@@ -78,6 +91,7 @@ mod tests {
                 generated_marker: None,
             },
             proposals: ProposalsSection::default(),
+            mesh: MeshSection::default(),
         }
     }
 
@@ -115,6 +129,13 @@ watch = true
 [proposals]
 autoapply_low = true
 
+[mesh]
+listen_port = 5050
+
+[mesh.peers]
+backend = "tcp://localhost:5051"
+db = "tcp://localhost:5052"
+
 [agents]
 codex_output = "AGENTS.md"
 "#;
@@ -124,6 +145,8 @@ codex_output = "AGENTS.md"
             cfg.knogg.generated_marker.as_deref(),
             Some("<!-- generated-by: knogg -->")
         );
+        assert_eq!(cfg.mesh.listen_port, Some(5050));
+        assert_eq!(cfg.mesh.peers.get("backend").as_deref(), Some(&"tcp://localhost:5051".to_string()));
     }
 
     #[test]

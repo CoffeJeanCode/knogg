@@ -28,6 +28,12 @@ fn touches_target(paths: &[PathBuf], target: &Path) -> bool {
 /// `marker` is the generated-by marker (from `knogg.toml`, or the default).
 pub fn watch(path: &str, marker: &str) -> Result<()> {
     let root = resolve_path(path)?;
+    // Stage 10: bring declared P2P peers online alongside the watcher.
+    if let Ok(cfg) = crate::core::config::load() {
+        crate::mesh::init_pool(&cfg.mesh);
+    }
+    // Stage 15: hourly background GC inside the daemon.
+    crate::commands::gc::spawn_daemon_gc(&root);
     let state_dir = root.join("state");
     let target = state_dir.join(TARGET);
 

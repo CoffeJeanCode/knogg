@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # knogg installer — downloads latest release from GitHub.
-# Usage: curl -fsSL https://raw.githubusercontent.com/jeanpierre/knogg/main/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.sh | bash
 set -euo pipefail
 
-REPO="jeanpierre/knogg"
+REPO="CoffeJeanCode/knogg"
 INSTALL_DIR="${KNOGG_INSTALL_DIR:-$HOME/.local/bin}"
 GITHUB_URL="https://github.com/${REPO}"
 

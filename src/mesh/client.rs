@@ -38,8 +38,9 @@ impl MeshClient {
         let writer_r = writer.clone();
         let pending_r = pending.clone();
         let project_r = project.to_string();
+        let vault_root_r = vault_root.clone();
         std::thread::spawn(move || {
-            reader_loop(reader_stream, writer_r, pending_r, project_r, vault_root)
+            reader_loop(reader_stream, writer_r, pending_r, project_r, vault_root_r);
         });
 
         Ok(Self {

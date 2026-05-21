@@ -510,7 +510,7 @@ pub fn status(path: &str) -> Result<()> {
 /// Load `state/active_context.yml` from a vault root.
 pub fn read_active_context(root: &Path) -> Result<ActiveContext> {
     let file = root.join("state/active_context.yml");
-    let raw = fs::read_to_string(&file)
+    let raw = crate::commands::migrate::read_and_migrate(&file)
         .with_context(|| format!("reading {} (run `knogg init` first?)", file.display()))?;
     serde_yaml::from_str(&raw).map_err(|e| anyhow!("parsing {}: {e}", file.display()))
 }

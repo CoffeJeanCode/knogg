@@ -165,6 +165,33 @@ pub enum Commands {
         #[arg(long, default_value_t = 5050)]
         port: u16,
     },
+    /// Start a P2P serve daemon — TCP JSON-RPC (read-only) on a port.
+    Serve {
+        /// TCP port to listen on.
+        #[arg(long, default_value_t = 5051)]
+        port: u16,
+    },
+    /// Clear vault lock files (Stage 13).
+    Unlock {
+        /// Vault path (overrides knogg.toml; defaults to ./.knogg).
+        #[arg(long)]
+        path: Option<String>,
+        /// Clear every `.lock` file under the vault.
+        #[arg(long)]
+        all: bool,
+        /// Clear the lock for one vault-relative file (e.g. state/active_context.yml).
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Reclaim disk space: purge old backups + terminal proposals (Stage 15).
+    Gc {
+        /// Vault path (overrides knogg.toml; defaults to ./.knogg).
+        #[arg(long)]
+        path: Option<String>,
+        /// Show what would be deleted without removing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Coding conventions from `core/style_guides.yml`.
     Style {
         /// Vault path (overrides knogg.toml; defaults to ./.knogg).

@@ -30,34 +30,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dropped legacy MCP tools (`get_brief`, `get_next_actions`, role/decision mutators, etc.) — use consolidated context or CLI
 - `make check` runs `fmt-check`, `lint`, and `test`
 
-## [Unreleased]
+## [1.2.0] — 2026-05-19
 
 ### Added
-- `knogg task` subcommand — claim/release partitioned tasks from `master_plan.yml`
-- `knogg style` subcommand — list/show/doctor for coding conventions
-- `knogg decision set-status` — update ADR status in bulk (variadic ids)
-- `knogg proposal apply/reject/show` — variadic ids for batch operations
-- `knogg proposal gc` — remove terminal proposals with `--status`, `--keep`, `--project` filters
-- `knogg messages ack` — variadic ids for batch acknowledgment
-- `knogg agents enable/disable` — toggle agent availability
-- `knogg agents enable-mcp/disable-mcp` — attach/detach MCP servers per agent
-- `knogg brief refresh/show/doctor` — compact project brief with content-hash freshness
-- `knogg hooks` — event-driven hook management (list/doctor/run/enable/disable)
-- Capability-aware `get_allowed_scope` MCP tool — returns denied files for open tasks owned by other agents
-- Style guide enforcement in `doctor` — module doc checks, optional `cargo fmt --check`
-- `init --prompt` — print recommended agent setup prompt
-- `init --agents-md` — write `AGENTS.md` guide during vault init
-- OpenCode agent adapter (`opencode_prompt.md`)
-- `clippy.toml` and `rustfmt.toml` configuration files
+- **P2P Mesh — Direct Peering** — `knogg serve --port <PORT>` async TCP JSON-RPC server
+- **Declarative Peering** — `knogg.toml [mesh]` section with `listen_port` + static `[mesh.peers]` table
+- **Connection Pool** — auto-reconnect on peer failure; resilient mesh topology
+- **query_peer MCP tool** — federated cross-vault queries via P2P pool
+- **subscribe_to_task MCP tool** — subscribe to task-done events from connected peers
+- **Event subscriptions** — `state set --status done` emits task-done events to subscribers
+- **`knogg unlock`** — manually clear stale lock files (global + per-file, Stage 13)
+- **`knogg gc`** — reclaim disk space: purge old backups + terminal proposals (Stage 15)
+- **Stale lock reclamation** — lock files with dead PIDs are auto-reclaimed after 30s timeout
+- **Granular lock metadata** — lock files carry PID, owner, timestamp, intent (JSON)
+- **Schema migrations** — transparent vault YAML upgrades on read (Stage 14)
+- Hub service in `docker-compose.yml` with exposed port 5050
 
 ### Changed
-- MCP server now supports full `initialize` handshake + `tools/call` envelope (backward-compatible with legacy direct methods)
-- `doctor` flags pending proposals by default (`--pending-proposals` flag)
-- `handoff` auto-fills `handoff.summary` in active context when empty (`--fill-summary`)
-- README restructured with TOC, feature table, MCP tool reference, and workflows
+- Lock timeout increased from 5s to 15s to accommodate network-backed vault access
+- Vault files now carry a `version` field for forward-compatible schema upgrades
+- `knogg watch` also starts P2P peers from `knogg.toml [mesh]` on boot
 
 ### Fixed
-- `make release` — atomic rename for binary copy (avoids ETXTBSY on recursive Docker use)
+- Lock reclamation prevents stale lock hang when `knogg` crashes
 
 ## [1.0.0] — 2026-05-16
 
