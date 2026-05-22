@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Declarative peering — Stage 10.
 //!
 //! Static topology declared in `knogg.toml [mesh.peers]`. The pool spawns a

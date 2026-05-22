@@ -10,7 +10,8 @@ use crate::core::vault::{audit_patch, resolve_path, safe_vault_path};
 /// MCP protocol version this server speaks.
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
-/// Expose `call_tool` for the mesh client (incoming cross-project queries).
+/// Expose `call_tool` for P2P dispatch (incoming cross-project queries).
+#[allow(dead_code)]
 pub fn call_tool_pub(root: &Path, name: &str, params: &Value) -> Result<Value> {
     call_tool(root, name, params)
 }
@@ -18,8 +19,6 @@ pub fn call_tool_pub(root: &Path, name: &str, params: &Value) -> Result<Value> {
 /// `knogg mcp`: serve the MCP tools over JSON-RPC on stdio.
 pub fn serve(path: &str) -> Result<()> {
     let root = resolve_path(path)?;
-    // Connect to hub if KNOGG_HUB_URL is set — non-fatal if hub is unavailable.
-    crate::mesh::init_from_env(root.clone());
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
 
@@ -70,13 +69,10 @@ fn error_response(id: Value, code: i64, message: &str) -> String {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}).to_string()
 }
 
-/// Read-only tool surface exposed to P2P peers (Stage 9 constraint).
+/// Read-only tool surface exposed to P2P peers — minimal surface only.
 pub const READ_ONLY_TOOLS: &[&str] = &[
     "get_active_context",
     "read_vault",
-    "list_vault",
-    "search_vault",
-    "get_tool_registry",
 ];
 
 /// Read-only JSON-RPC dispatch for the P2P serve daemon.
@@ -125,7 +121,7 @@ fn initialize_result() -> Value {
     })
 }
 
-/// MCP `tools/list` result: tool descriptors with input schemas.
+/// MCP `tools/list` result: minimal core tool descriptors (ADR-0010 pruned surface).
 fn tools_list() -> Value {
     let obj = |props: Value, required: Value| {
         json!({"type": "object", "properties": props,
@@ -133,7 +129,7 @@ fn tools_list() -> Value {
     };
     json!({"tools": [
         {"name": "get_active_context",
-         "description": "Consolidated context: focus, next_actions, decisions, scope, handoff, inbox (ADR-0010)",
+         "description": "Consolidated context: focus, next_actions, decisions, scope, handoff, inbox",
          "inputSchema": json!({"type": "object",
             "properties": {"agent": {"type": "string"}},
             "additionalProperties": false})},
@@ -147,18 +143,6 @@ fn tools_list() -> Value {
             },
             "required": ["path"],
             "additionalProperties": false})},
-        {"name": "list_vault",
-         "description": "List safe Vault paths",
-         "inputSchema": json!({"type": "object",
-            "properties": {"include_proposals": {"type": "boolean"}},
-            "additionalProperties": false})},
-        {"name": "search_vault",
-         "description": "Search vault files for a text query (case-insensitive)",
-         "inputSchema": obj(
-            json!({"query": {"type": "string"}}), json!(["query"]))},
-        {"name": "get_tool_registry",
-         "description": "Return the Vault tool registry",
-         "inputSchema": obj(json!({}), json!([]))},
         {"name": "propose_state_update",
          "description": "Stage or auto-apply a state update (risk-tiered, ADR-0011)",
          "inputSchema": obj(
@@ -166,21 +150,8 @@ fn tools_list() -> Value {
                    "patch": {"type": "object"},
                    "reason": {"type": "string"}}),
             json!(["target", "patch", "reason"]))},
-        {"name": "audit_commit",
-         "description": "Apply a staged proposal by id",
-         "inputSchema": obj(json!({"id": {"type": "string"}}), json!(["id"]))},
-        {"name": "query_mesh",
-         "description": "Query another project's vault via the Knogg Hub (requires KNOGG_HUB_URL env var)",
-         "inputSchema": obj(
-            json!({
-                "target_project": {"type": "string"},
-                "query": {"type": "string",
-                          "enum": ["get_active_context","read_vault","list_vault","search_vault"]},
-                "args": {"type": "object"},
-            }),
-            json!(["target_project", "query"]))},
         {"name": "query_peer",
-         "description": "Query a directly connected peer via P2P pool (knogg.toml [mesh.peers])",
+         "description": "Query a peer vault via lazy TCP connection (knogg.toml [mesh.peers])",
          "inputSchema": obj(
             json!({
                 "peer": {"type": "string"},
@@ -188,14 +159,6 @@ fn tools_list() -> Value {
                 "params": {"type": "object"},
             }),
             json!(["peer", "method"]))},
-        {"name": "subscribe_to_task",
-         "description": "Subscribe to task-done events from a peer (forwarded via P2P pool)",
-         "inputSchema": obj(
-            json!({
-                "peer": {"type": "string"},
-                "task_id": {"type": "string"},
-            }),
-            json!(["peer", "task_id"]))},
         {"name": "messages",
          "description": "List open inbox or post a message (action=list|post)",
          "inputSchema": json!({"type": "object",
@@ -211,6 +174,11 @@ fn tools_list() -> Value {
             },
             "required": ["action"],
             "additionalProperties": false})},
+        {"name": "ack_message",
+         "description": "Acknowledge a message as read by an agent",
+         "inputSchema": obj(
+            json!({"id": {"type": "string"}, "by": {"type": "string"}}),
+            json!(["id", "by"]))},
     ]})
 }
 
@@ -237,7 +205,7 @@ fn handle(root: &Path, method: &str, params: &Value) -> Result<Value> {
     }
 }
 
-/// Invoke a vault tool by name (v1 surface: 8 tools, ADR-0010).
+/// Invoke a vault tool by name (core surface: ADR-0010 pruned).
 fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
     match name {
         "get_active_context" => get_active_context(root, params),
@@ -247,18 +215,6 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             let end = params.get("end_line").and_then(Value::as_u64);
             read_vault(root, target, start, end)
         }
-        "list_vault" => {
-            let include_proposals = params
-                .get("include_proposals")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            list_vault(root, include_proposals)
-        }
-        "search_vault" => {
-            let query = str_param(params, "query")?;
-            search_vault(root, query)
-        }
-        "get_tool_registry" => read_vault(root, "plans/tool_registry.yml", None, None),
         "propose_state_update" => {
             let target = str_param(params, "target")?;
             let patch = params
@@ -290,20 +246,6 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
                 "audit_message": audit.err().map(|e| e.to_string()),
             }))
         }
-        "audit_commit" => {
-            let id = str_param(params, "id")?;
-            crate::commands::proposal::apply(root, id)?;
-            let _ = crate::commands::brief::refresh(root);
-            Ok(json!({"committed": true, "proposal_id": id}))
-        }
-        "messages" => messages_tool(root, params),
-        "query_mesh" => {
-            let target = str_param(params, "target_project")?;
-            let query = str_param(params, "query")?;
-            let args = params.get("args").cloned().unwrap_or(json!({}));
-            crate::mesh::with_client(|c| c.query(target, query, &args))
-                .ok_or_else(|| anyhow!("KNOGG_HUB_URL not set — hub not connected"))?
-        }
         "query_peer" => {
             let peer = str_param(params, "peer")?;
             let method = str_param(params, "method")?;
@@ -311,24 +253,21 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
                 bail!("method '{method}' not allowed via query_peer (read-only surface)");
             }
             let args = params.get("params").cloned().unwrap_or(json!({}));
-            crate::mesh::with_pool(|p| p.query(peer, method, &args))
-                .ok_or_else(|| anyhow!("peer pool not initialized"))?
+            let cfg = crate::core::config::load().unwrap_or_default();
+            let addr = cfg.mesh.peers.get(peer)
+                .ok_or_else(|| anyhow!("peer '{peer}' not in [mesh.peers] — check knogg.toml"))?;
+            lazy_query(addr, method, &args)
         }
-        "subscribe_to_task" => {
-            let peer = str_param(params, "peer")?;
-            let task_id = str_param(params, "task_id")?.to_string();
-            let pool = crate::mesh::pool_handle()
-                .ok_or_else(|| anyhow!("peer pool not initialized"))?;
-            let tid = task_id.clone();
-            pool.subscribe(peer, &task_id, move |evt| {
-                eprintln!("[mesh:events] task_done received: {} → {}",
-                    tid, evt);
-            })?;
-            Ok(json!({"subscribed": true, "task_id": task_id, "peer": peer}))
+        "messages" => messages_tool(root, params),
+        "ack_message" => {
+            let id = str_param(params, "id")?;
+            let by = str_param(params, "by")?;
+            crate::commands::messages::ack_many(root, &[id.to_string()], by)?;
+            Ok(json!({"acked": true, "id": id, "by": by}))
         }
-        // Legacy tool names → helpful errors after v1 prune.
+        // Tools removed from MCP surface — use read_vault or CLI commands instead.
         legacy if is_legacy_tool(legacy) => {
-            bail!("tool '{legacy}' removed in v1 MCP surface — use get_active_context, messages, or CLI")
+            bail!("tool '{legacy}' removed from MCP surface — use read_vault or CLI commands")
         }
         other => bail!("unknown method '{other}'"),
     }
@@ -345,7 +284,6 @@ fn is_legacy_tool(name: &str) -> bool {
             | "get_style_guides"
             | "post_message"
             | "get_messages"
-            | "ack_message"
             | "list_proposals"
             | "propose_decision"
             | "list_roles"
@@ -353,6 +291,12 @@ fn is_legacy_tool(name: &str) -> bool {
             | "set_role"
             | "get_agent_role"
             | "set_agent_role"
+            | "list_vault"
+            | "search_vault"
+            | "get_tool_registry"
+            | "audit_commit"
+            | "query_mesh"
+            | "subscribe_to_task"
     )
 }
 
@@ -416,6 +360,43 @@ fn messages_tool(root: &Path, params: &Value) -> Result<Value> {
     }
 }
 
+/// Ephemeral P2P query: open socket, send one JSON-RPC request, read response, close.
+/// Times out in 3 s (connect) + 5 s (read). No persistent state — safe for MCP stateless mode.
+fn lazy_query(addr: &str, method: &str, params: &Value) -> Result<Value> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    let stripped = addr.strip_prefix("tcp://").unwrap_or(addr);
+    let sock: std::net::SocketAddr = stripped
+        .parse()
+        .map_err(|_| anyhow!("invalid peer address '{addr}'"))?;
+
+    let mut stream = TcpStream::connect_timeout(&sock, Duration::from_secs(3))
+        .map_err(|e| anyhow!("peer at {addr} unreachable: {e}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(3)))?;
+
+    let req = json!({"jsonrpc": "2.0", "id": "mcp-lazy", "method": method, "params": params});
+    let line = serde_json::to_string(&req)?;
+    stream.write_all(line.as_bytes())?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+
+    let resp_line = BufReader::new(&stream)
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow!("peer closed connection without response"))??;
+
+    let resp: Value = serde_json::from_str(&resp_line)
+        .map_err(|e| anyhow!("invalid response from peer: {e}"))?;
+
+    if let Some(err) = resp.get("error") {
+        bail!("{}", err["message"].as_str().unwrap_or("remote error"));
+    }
+    Ok(resp.get("result").cloned().unwrap_or(resp))
+}
+
 fn str_param<'a>(params: &'a Value, key: &str) -> Result<&'a str> {
     params
         .get(key)
@@ -460,6 +441,7 @@ pub fn read_vault(
 ///
 /// `backups/` is never listed; `state/proposals/` is listed only when
 /// `include_proposals` is true.
+#[allow(dead_code)]
 pub fn list_vault(root: &Path, include_proposals: bool) -> Result<Value> {
     let mut paths = Vec::new();
     collect_paths(root, root, include_proposals, &mut paths)?;
@@ -467,6 +449,7 @@ pub fn list_vault(root: &Path, include_proposals: bool) -> Result<Value> {
     Ok(json!({ "paths": paths }))
 }
 
+#[allow(dead_code)]
 fn collect_paths(
     root: &Path,
     dir: &Path,
@@ -498,6 +481,7 @@ fn collect_paths(
 }
 
 /// `search_vault`: case-insensitive text search across vault files.
+#[allow(dead_code)]
 pub fn search_vault(root: &Path, query: &str) -> Result<Value> {
     let needle = query.to_lowercase();
     let mut paths = Vec::new();
@@ -614,7 +598,8 @@ mod tests {
         std::fs::create_dir_all(root.join("backups/stamp")).unwrap();
         std::fs::write(root.join("backups/stamp/old.yml"), "x").unwrap();
 
-        let default = handle(&root, "list_vault", &json!({})).unwrap();
+        // Call the Rust function directly — list_vault removed from MCP dispatch.
+        let default = list_vault(&root, false).unwrap();
         let listed = default["paths"].as_array().unwrap();
         assert!(listed.iter().all(|p| {
             let s = p.as_str().unwrap();
@@ -622,7 +607,7 @@ mod tests {
         }));
         assert!(listed.iter().any(|p| p == "state/active_context.yml"));
 
-        let with = handle(&root, "list_vault", &json!({"include_proposals": true})).unwrap();
+        let with = list_vault(&root, true).unwrap();
         assert!(with["paths"]
             .as_array()
             .unwrap()
@@ -635,7 +620,8 @@ mod tests {
     fn get_tool_registry_returns_mappings() {
         let root = temp_root("registry");
         init(root.to_str().unwrap(), false).unwrap();
-        let v = handle(&root, "get_tool_registry", &json!({})).unwrap();
+        // get_tool_registry removed from MCP — use read_vault directly.
+        let v = read_vault(&root, "plans/tool_registry.yml", None, None).unwrap();
         assert!(v["tools"].is_array());
         assert!(v["tools"][0]["output"].is_string());
         fs::remove_dir_all(&root).ok();
@@ -662,7 +648,8 @@ mod tests {
         let mid = read_vault(&root, "plans/roles.yml", None, None).unwrap();
         assert_eq!(before, mid);
 
-        handle(&root, "audit_commit", &json!({ "id": id })).unwrap();
+        // audit_commit removed from MCP — apply via the underlying function.
+        crate::commands::proposal::apply(&root, &id).unwrap();
         let after = read_vault(&root, "plans/roles.yml", None, None).unwrap();
         assert!(after.get("roles").is_some());
         fs::remove_dir_all(&root).ok();
@@ -697,12 +684,13 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 11);
+        assert_eq!(names.len(), 6);
         assert!(names.contains(&"get_active_context"));
-        assert!(names.contains(&"messages"));
-        assert!(names.contains(&"query_mesh"));
+        assert!(names.contains(&"read_vault"));
+        assert!(names.contains(&"propose_state_update"));
         assert!(names.contains(&"query_peer"));
-        assert!(names.contains(&"subscribe_to_task"));
+        assert!(names.contains(&"messages"));
+        assert!(names.contains(&"ack_message"));
     }
 
     #[test]
@@ -754,8 +742,8 @@ mod tests {
     fn search_vault_finds_text() {
         let root = temp_root("search");
         init(root.to_str().unwrap(), false).unwrap();
-        // case-insensitive: `Focus` matches the `focus:` key in YAML.
-        let v = handle(&root, "search_vault", &json!({"query": "FOCUS"})).unwrap();
+        // search_vault removed from MCP — call the Rust function directly.
+        let v = search_vault(&root, "FOCUS").unwrap();
         let matches = v["matches"].as_array().unwrap();
         assert!(!matches.is_empty());
         assert!(matches

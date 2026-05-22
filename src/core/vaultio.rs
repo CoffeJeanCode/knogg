@@ -142,12 +142,14 @@ impl Drop for VaultLock {
 }
 
 /// Per-file granular lock: `<file>.lock` next to the target.
+#[allow(dead_code)]
 pub struct FileLock {
     lock_path: PathBuf,
 }
 
 impl FileLock {
     /// Acquire a granular lock for `target`. `intent` is recorded in metadata.
+    #[allow(dead_code)]
     pub fn acquire(target: &Path, intent: &str) -> Result<FileLock> {
         let lock_path = lock_path_for(target);
         acquire_path(&lock_path, LOCK_TIMEOUT, intent)?;

@@ -21,6 +21,7 @@ fn bus() -> &'static Bus {
     BUS.get_or_init(Bus::new)
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskDoneEvent {
     pub task_id: String,
@@ -105,4 +106,3 @@ async fn deliver(task_id: String, by: String, subs: Vec<Subscriber>) {
     }
 }
 
-pub fn subscribe(_peer: &str, _task_id: &str, _from: &str) {}

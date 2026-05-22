@@ -182,9 +182,11 @@ fn merge_yaml(base: &mut serde_yaml::Value, patch: &serde_yaml::Value) {
 }
 
 // ---- active context model --------------------------------------------------
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ActiveContext {
+    #[serde(default)]
     pub project: Project,
+    #[serde(default)]
     pub focus: Focus,
     #[serde(default)]
     pub constraints: Vec<String>,
@@ -199,11 +201,27 @@ pub struct Project {
     pub name: String,
 }
 
+impl Default for Project {
+    fn default() -> Self {
+        Self { name: String::new() }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Focus {
     pub stage: String,
     pub task: String,
     pub status: String,
+}
+
+impl Default for Focus {
+    fn default() -> Self {
+        Self {
+            stage: String::new(),
+            task: String::new(),
+            status: "todo".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
