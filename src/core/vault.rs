@@ -196,15 +196,9 @@ pub struct ActiveContext {
     pub handoff: Handoff,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Project {
     pub name: String,
-}
-
-impl Default for Project {
-    fn default() -> Self {
-        Self { name: String::new() }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

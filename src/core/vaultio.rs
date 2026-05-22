@@ -34,19 +34,26 @@ struct LockMeta {
 }
 
 fn unix_now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Best-effort liveness probe: signal 0 to `pid`. Linux/macOS only; on Windows
 /// assume the PID is alive (no recovery on that platform).
 #[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
-    if pid == 0 { return false; }
+    if pid == 0 {
+        return false;
+    }
     // SAFETY: kill(pid, 0) only checks for existence; no signal is delivered.
     unsafe { libc::kill(pid as i32, 0) == 0 || *libc::__errno_location() != libc::ESRCH }
 }
 #[cfg(not(unix))]
-fn pid_alive(_pid: u32) -> bool { true }
+fn pid_alive(_pid: u32) -> bool {
+    true
+}
 
 fn write_meta(path: &Path, intent: &str) -> Result<()> {
     let meta = LockMeta {

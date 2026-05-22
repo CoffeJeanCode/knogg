@@ -35,7 +35,9 @@ pub struct PeerHandle {
 }
 
 impl PeerHandle {
-    pub fn addr(&self) -> &str { &self.addr }
+    pub fn addr(&self) -> &str {
+        &self.addr
+    }
 
     pub fn is_connected(&self) -> bool {
         self.state.writer.lock().unwrap().is_some()
@@ -70,7 +72,8 @@ impl PeerHandle {
     }
 
     pub fn subscribe_task<F>(&self, task_id: &str, cb: F) -> Result<()>
-    where F: Fn(&Value) + Send + 'static,
+    where
+        F: Fn(&Value) + Send + 'static,
     {
         self.state.subscriptions.lock().unwrap()
             .insert(task_id.to_string(), Box::new(cb));
@@ -195,7 +198,8 @@ impl Pool {
     }
 
     pub fn subscribe<F>(&self, peer: &str, task_id: &str, cb: F) -> Result<()>
-    where F: Fn(&Value) + Send + 'static,
+    where
+        F: Fn(&Value) + Send + 'static,
     {
         let peers = self.peers.lock().unwrap();
         let h = peers.get(peer).ok_or_else(|| anyhow!("unknown peer '{}'", peer))?;
@@ -208,5 +212,7 @@ impl Pool {
 }
 
 impl Default for Pool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

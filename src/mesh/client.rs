@@ -104,7 +104,6 @@ impl MeshClient {
     }
 }
 
-
 /// Initialize the global client from env vars. No-op if already initialized or KNOGG_HUB_URL unset.
 pub fn init_from_env(vault_root: PathBuf) {
     CLIENT.get_or_init(|| {

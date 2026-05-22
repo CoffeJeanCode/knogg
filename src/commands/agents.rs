@@ -35,7 +35,9 @@ pub struct AgentRegistry {
     pub agents: BTreeMap<String, Agent>,
 }
 
-fn default_registry_version() -> u32 { 1 }
+fn default_registry_version() -> u32 {
+    1
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Workspace {

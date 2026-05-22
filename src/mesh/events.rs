@@ -100,9 +100,11 @@ async fn deliver(task_id: String, by: String, subs: Vec<Subscriber>) {
         }
     }
     if !survivors.is_empty() {
-        bus().by_task.lock().unwrap()
-            .entry(task_id).or_default()
+        bus().by_task
+            .lock()
+            .unwrap()
+            .entry(task_id)
+            .or_default()
             .extend(survivors);
     }
 }
-

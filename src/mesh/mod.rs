@@ -22,4 +22,3 @@ pub fn init_pool(cfg: &crate::core::config::MeshSection) {
     }
     let _ = PEER_POOL.set(Arc::new(pool));
 }
-
