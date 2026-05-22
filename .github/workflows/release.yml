@@ -19,15 +19,19 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset_name: knogg-linux-amd64
-          - os: ubuntu-latest
-            target: x86_64-pc-windows-gnu
+            bin: knogg
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
             asset_name: knogg-windows-amd64.exe
+            bin: knogg.exe
           - os: macos-latest
             target: x86_64-apple-darwin
             asset_name: knogg-macos-amd64
+            bin: knogg
           - os: macos-latest
             target: aarch64-apple-darwin
             asset_name: knogg-macos-arm64
+            bin: knogg
 
     runs-on: ${{ matrix.os }}
 
@@ -39,20 +43,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install mingw (Windows cross-compile)
-        if: matrix.target == 'x86_64-pc-windows-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
-
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare artifact
+        shell: bash
         run: |
           mkdir -p artifacts
-          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            cp target/${{ matrix.target }}/release/knogg.exe artifacts/${{ matrix.asset_name }}
-          else
-            cp target/${{ matrix.target }}/release/knogg artifacts/${{ matrix.asset_name }}
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} artifacts/${{ matrix.asset_name }}
+          if [[ "${{ matrix.os }}" != "windows-latest" ]]; then
             chmod +x artifacts/${{ matrix.asset_name }}
           fi
 
