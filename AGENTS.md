@@ -2,13 +2,12 @@
 # Handoff → Codex
 
 Project: knogg
-Stage: Stage 1
-Task: Implement init & status
+Stage: frontend-ui
+Task: Implement badge
 Status: in_progress
 
 ## Constraints
 
 ## Next Actions
-- Update billing page
 
 ## Summary
