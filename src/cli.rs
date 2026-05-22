@@ -159,12 +159,6 @@ pub enum Commands {
         #[command(subcommand)]
         action: TaskAction,
     },
-    /// Start the Knogg Hub — central router for cross-project agent communication.
-    Hub {
-        /// TCP port to listen on.
-        #[arg(long, default_value_t = 5050)]
-        port: u16,
-    },
     /// Start a P2P serve daemon — TCP JSON-RPC (read-only) on a port.
     Serve {
         /// TCP port to listen on.
@@ -199,6 +193,11 @@ pub enum Commands {
         path: Option<String>,
         #[command(subcommand)]
         action: StyleAction,
+    },
+    /// Read and write knogg.yml project configuration.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
     },
 }
 
@@ -481,5 +480,23 @@ pub enum DecisionAction {
         /// New status (proposed, accepted, rejected, superseded).
         #[arg(long)]
         status: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigAction {
+    /// Print knogg.yml (or legacy knogg.toml).
+    Show,
+    /// Set a config value using dot-notation key (e.g. mesh.listen_port 5051).
+    Set {
+        /// Dot-notation key, e.g. mesh.listen_port or mesh.peers.backend.
+        key: String,
+        /// Value to set (auto-typed: bool, integer, or string).
+        value: String,
+    },
+    /// Get a config value by dot-notation key.
+    Get {
+        /// Dot-notation key.
+        key: String,
     },
 }

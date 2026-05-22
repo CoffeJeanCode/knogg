@@ -6,7 +6,7 @@ mod mesh;
 
 use clap::Parser;
 use cli::{Cli, Commands, DecisionAction, MessageAction, ProposalAction, StateAction, TaskAction};
-use cli::{AgentsAction, BriefAction, HooksAction, RoleAction, StyleAction};
+use cli::{AgentsAction, BriefAction, ConfigAction, HooksAction, RoleAction, StyleAction};
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -169,9 +169,6 @@ fn main() -> anyhow::Result<()> {
                 BriefAction::Doctor => commands::brief::cmd_doctor(&p)?,
             }
         }
-        Commands::Hub { port } => {
-            commands::hub::serve(port)?;
-        }
         Commands::Serve { port } => {
             let root = resolve(None);
             crate::mesh::init_pool(&cfg.mesh);
@@ -225,6 +222,11 @@ fn main() -> anyhow::Result<()> {
                 StyleAction::Doctor { check_fmt } => commands::style::cmd_doctor(&p, check_fmt)?,
             }
         }
+        Commands::Config { action } => match action {
+            ConfigAction::Show => commands::config::cmd_show()?,
+            ConfigAction::Set { key, value } => commands::config::cmd_set(&key, &value)?,
+            ConfigAction::Get { key } => commands::config::cmd_get(&key)?,
+        },
     }
 
     Ok(())

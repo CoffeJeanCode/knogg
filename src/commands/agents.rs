@@ -25,6 +25,7 @@ const SECRET_HINTS: [&str; 4] = ["sk-", "ghp_", "Bearer ", "AKIA"];
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AgentRegistry {
+    #[serde(default = "default_registry_version")]
     pub version: u32,
     pub workspace: Workspace,
     pub defaults: Defaults,
@@ -33,6 +34,8 @@ pub struct AgentRegistry {
     #[serde(default)]
     pub agents: BTreeMap<String, Agent>,
 }
+
+fn default_registry_version() -> u32 { 1 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Workspace {

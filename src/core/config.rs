@@ -4,8 +4,10 @@ use std::fs;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-/// Project config file, looked up in the current working directory.
-const CONFIG_FILE: &str = "knogg.toml";
+/// Primary config file (YAML).
+pub const CONFIG_FILE: &str = "knogg.yml";
+/// Legacy config file (TOML) — loaded when knogg.yml absent.
+const CONFIG_FILE_LEGACY: &str = "knogg.toml";
 
 /// Fallback vault path when neither the CLI flag nor config provide one.
 const DEFAULT_PATH: &str = "./.knogg";
@@ -58,17 +60,23 @@ impl Config {
     }
 }
 
-/// Parse `knogg.toml` content into a [`Config`].
-fn parse(raw: &str) -> Result<Config> {
+fn parse_yaml(raw: &str) -> Result<Config> {
+    serde_yaml::from_str(raw).context("parsing knogg.yml")
+}
+
+fn parse_toml(raw: &str) -> Result<Config> {
     toml::from_str(raw).context("parsing knogg.toml")
 }
 
-/// Load `knogg.toml` from the current directory; absent file -> defaults.
+/// Load config: knogg.yml first, fall back to knogg.toml, then defaults.
 pub fn load() -> Result<Config> {
-    match fs::read_to_string(CONFIG_FILE) {
-        Ok(raw) => parse(&raw),
-        Err(_) => Ok(Config::default()),
+    if let Ok(raw) = fs::read_to_string(CONFIG_FILE) {
+        return parse_yaml(&raw);
     }
+    if let Ok(raw) = fs::read_to_string(CONFIG_FILE_LEGACY) {
+        return parse_toml(&raw);
+    }
+    Ok(Config::default())
 }
 
 /// Resolve the effective vault path.
@@ -117,29 +125,28 @@ mod tests {
     #[test]
     fn parses_full_config_and_ignores_unknown_sections() {
         let raw = r#"
-[knogg]
-path = "./.knogg"
-generated_marker = "<!-- generated-by: knogg -->"
+knogg:
+  path: ./.knogg
+  generated_marker: "<!-- generated-by: knogg -->"
 
-[features]
-clipboard = false
-mcp_stdio = true
-watch = true
+features:
+  clipboard: false
+  mcp_stdio: true
+  watch: true
 
-[proposals]
-autoapply_low = true
+proposals:
+  autoapply_low: true
 
-[mesh]
-listen_port = 5050
+mesh:
+  listen_port: 5050
+  peers:
+    backend: "tcp://localhost:5051"
+    db: "tcp://localhost:5052"
 
-[mesh.peers]
-backend = "tcp://localhost:5051"
-db = "tcp://localhost:5052"
-
-[agents]
-codex_output = "AGENTS.md"
+agents:
+  codex_output: AGENTS.md
 "#;
-        let cfg = parse(raw).unwrap();
+        let cfg = parse_yaml(raw).unwrap();
         assert_eq!(cfg.knogg.path.as_deref(), Some("./.knogg"));
         assert_eq!(
             cfg.knogg.generated_marker.as_deref(),
@@ -160,7 +167,21 @@ codex_output = "AGENTS.md"
     }
 
     #[test]
-    fn invalid_toml_is_an_error() {
-        assert!(parse("this is not = valid = toml").is_err());
+    fn invalid_yaml_is_an_error() {
+        assert!(parse_yaml("key: [unclosed bracket").is_err());
+    }
+
+    #[test]
+    fn legacy_toml_parses() {
+        let raw = r#"
+[knogg]
+path = "./.knogg"
+
+[proposals]
+autoapply_low = true
+"#;
+        let cfg = parse_toml(raw).unwrap();
+        assert_eq!(cfg.knogg.path.as_deref(), Some("./.knogg"));
+        assert!(cfg.proposals.autoapply_low);
     }
 }

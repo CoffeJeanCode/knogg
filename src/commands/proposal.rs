@@ -219,6 +219,7 @@ pub fn apply_inner(root: &Path, id: &str) -> Result<()> {
 }
 
 /// Apply a pending proposal (acquires lock).
+#[allow(dead_code)]
 pub fn apply(root: &Path, id: &str) -> Result<()> {
     let _lock = VaultLock::acquire(root)?;
     apply_inner(root, id)

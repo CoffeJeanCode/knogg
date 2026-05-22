@@ -1,6 +1,6 @@
 pub mod agents;
-pub mod hub;
 pub mod brief;
+pub mod config;
 pub mod decision;
 pub mod doctor;
 pub mod handoff;
