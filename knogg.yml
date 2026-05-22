@@ -1,0 +1,16 @@
+knogg:
+  path: ./.knogg
+  generated_marker: "<!-- generated-by: knogg -->"
+
+features:
+  clipboard: false
+  mcp_stdio: true
+  watch: true
+
+proposals:
+  autoapply_low: true
+
+agents:
+  opencode_output: AGENTS.md
+  cursor_output: .cursorrules
+  claude_output: .claude/context.md
