@@ -6,8 +6,8 @@
 [![License](https://img.shields.io/badge/License-APACHE2.0-blue)](LICENSE)
 [![Version](https://img.shields.io/github/v/release/CoffeJeanCode/knogg?label=version)](https://github.com/CoffeJeanCode/knogg/releases)
 [![Docker](https://img.shields.io/badge/Docker-first-2496ED?logo=docker)](docker-compose.yml)
-[![MCP](https://img.shields.io/badge/MCP-stdio-black)](README.md#6-mcp-server-for-ai-agents)
-[![Mesh](https://img.shields.io/badge/Mesh-federation-7B61FF)](README.md#knogg-mesh)
+[![MCP](https://img.shields.io/badge/MCP-stdio-black)](docs/mcp.md)
+[![Mesh](https://img.shields.io/badge/Mesh-federation-7B61FF)](docs/mesh.md)
 
 ## Features
 
@@ -21,7 +21,7 @@
 | **Template sync** | Generate `.cursorrules`, `AGENTS.md`, `.claude/context.md` from templates |
 | **Reactive watch** | Auto-re-sync when the active context changes |
 | **Mesh federation** | Cross-project agent communication via TCP hub (`knogg hub`) |
-| **P2P peering** | Direct peer-to-peer connections via `knogg.toml [mesh.peers]` — no hub needed |
+| **P2P peering** | Direct peer-to-peer connections via `knogg.toml [mesh.peers]` |
 | **Event subscriptions** | Cross-repo state change propagation |
 | **Stale lock reclamation** | Dead-PID detection + auto-reclaim after 30s |
 | **Schema migrations** | Transparent vault YAML upgrades on read |
@@ -29,65 +29,64 @@
 ## Quick Start
 
 ```bash
-# Build release binaries (Docker — no local Rust required)
-make release            # → ./dist/knogg + ./dist/knogg.exe
+# Install (Linux/macOS)
+curl -fsSL https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.sh | bash
 
-# Initialize the vault
-./knogg init
+# Install (Windows PowerShell)
+irm https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.ps1 | iex
 
-# Check status & integrity
-./knogg status
-./knogg doctor
-
-# Set focus and sync tool configs
-./knogg state set --stage auth --task "Add login" --status in_progress
-./knogg sync
-./knogg handoff --to cursor --print
+# Initialize and use
+knogg init
+knogg state set --stage auth --task "Add login" --status in_progress
+knogg sync
+knogg handoff --to cursor --print
 ```
 
-## Table of Contents
+## Documentation
 
-- [Installation](#installation)
-- [Vault Layout](#vault-layout)
-- [Command Reference](#command-reference)
-- [MCP Server](#mcp-server)
-- [Workflows](#workflows)
-- [Knogg Mesh](#knogg-mesh)
-- [Safety Guarantees](#safety-guarantees)
-- [Configuration](#configuration)
-- [Project Structure](#project-structure)
-- [Contributing](#contributing)
-- [Known Limitations](#known-limitations)
+| Doc | Contents |
+|-----|----------|
+| [Installation](#installation) | Installers, binaries, build from source |
+| [docs/commands.md](docs/commands.md) | Full command reference |
+| [docs/mcp.md](docs/mcp.md) | MCP tools, registering with agents |
+| [docs/mesh.md](docs/mesh.md) | Hub federation + P2P peering |
+| [docs/vault.md](docs/vault.md) | Vault layout, safety guarantees, maintenance |
+| [docs/configuration.md](docs/configuration.md) | knogg.toml, path precedence, project structure |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Dev setup, code style, PR process |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ---
 
 ## Installation
 
-### Quick Install (Recommended)
-
-Download the latest release binary — no source code needed:
+### Linux / macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.sh | bash
 ```
 
-Or with a specific version:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.sh | bash
-```
-
-Set a custom install directory:
+Custom install directory:
 
 ```bash
 KNOGG_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.sh | bash
 ```
 
-### Download from GitHub Releases
+### Windows (PowerShell)
 
-Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows:
+```powershell
+irm https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.ps1 | iex
+```
 
-**https://github.com/CoffeJeanCode/knogg/releases**
+Custom directory or pinned version:
+
+```powershell
+$env:KNOGG_INSTALL_DIR = "C:\Tools\knogg"; irm https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.ps1 | iex
+$env:KNOGG_VERSION = "v1.1.0";             irm https://raw.githubusercontent.com/CoffeJeanCode/knogg/main/scripts/install.ps1 | iex
+```
+
+### Download Binary
+
+Pre-built binaries at **https://github.com/CoffeJeanCode/knogg/releases**:
 
 | Platform | Asset |
 |----------|-------|
@@ -96,779 +95,55 @@ Pre-built binaries for Linux, macOS (Intel + Apple Silicon), and Windows:
 | macOS Apple Silicon | `knogg-macos-arm64` |
 | Windows x86_64 | `knogg-windows-amd64.exe` |
 
-Download, make executable, and run:
-
 ```bash
 # Linux / macOS
 curl -LO https://github.com/CoffeJeanCode/knogg/releases/latest/download/knogg-linux-amd64
 chmod +x knogg-linux-amd64
 sudo mv knogg-linux-amd64 /usr/local/bin/knogg
-
-# Windows (PowerShell as Administrator)
-irm https://github.com/CoffeJeanCode/knogg/releases/latest/download/knogg-windows-amd64.exe -o $env:LOCALAPPDATA\knogg.exe
-# Add $env:LOCALAPPDATA to your PATH, then: knogg.exe init
 ```
-
-### Prerequisites
-
-- **Docker** (Compose v2) — only required for building from source
-- No local Rust toolchain required for runtime
 
 ### Build from Source
 
+Requires Docker (Compose v2) — no local Rust toolchain needed.
+
 ```bash
-# Full release: Unix + Windows cross-compiled into ./dist
-make release
-
-# Run tests
+make release    # → ./dist/knogg + ./dist/knogg.exe
 make test
-
-# Interactive dev shell
-make dev
+make dev        # interactive dev shell
 ```
-
-### Three Ways to Run
 
 | Method | Command | When |
 |--------|---------|------|
 | Wrapper | `./knogg <cmd>` | Daily use — uses `./dist/knogg` if built, else Docker |
-| Binary | `./dist/knogg <cmd>` | Fastest — requires `make release` first |
-| Docker | `docker compose run --rm dev cargo run -- <cmd>` | CI / no binary built |
-
-> **Tip:** After editing source, rerun `make release` to refresh `./dist/knogg`; otherwise the wrapper runs the stale binary.
+| Binary | `./dist/knogg <cmd>` | Fastest — requires `make release` |
+| Docker | `docker compose run --rm dev cargo run -- <cmd>` | CI / no binary |
 
 ---
 
-## Vault Layout
-
-```
-.knogg/
-├── core/                     # Stable project knowledge
-│   ├── index.yml
-│   ├── architecture.yml
-│   └── style_guides.yml
-├── state/                    # Changing state (gitignored)
-│   ├── active_context.yml    # Project / focus / constraints / next_actions
-│   ├── brief.yml             # Compact brief for MCP tools
-│   ├── decision_log.yml      # ADR entries
-│   ├── messages.yml          # Inter-agent message log
-│   └── proposals/            # Staged proposals (PROP-0001.yml, …)
-├── plans/
-│   ├── master_plan.yml       # Multi-stage roadmap
-│   ├── agent_registry.yml    # Agent definitions & MCP config
-│   ├── roles.yml             # Agent role specs
-│   ├── tool_registry.yml     # Template → output mappings
-│   └── hooks.yml             # Event-driven hooks
-└── adapters/                 # Minijinja handoff templates
-    ├── cursor_prompt.md
-    ├── claude_code.md
-    ├── codex_prompt.md
-    └── opencode_prompt.md
-```
-
-### Active Context
-
-```yaml
-project:
-  name: knogg
-focus:
-  stage: Stage 8 — Dynamic workflows
-  task: OpenCode: agent capabilities + registry (8D)
-  status: in_progress
-constraints:
-  - "Rust 2021 CLI; build and test via Docker"
-  - "All vault writes through knogg (global lock + atomic rename)"
-next_actions:
-  - "8D (opencode): populate capabilities in agent_registry.yml"
-  - "Stage 6 remaining: context profiles per agent in agent_registry"
-  - "Run knogg brief doctor after state changes"
-  - "8E: make test / doctor / sync verification"
-handoff:
-  summary: ""
-```
-
----
-
-## Command Reference
-
-Every command accepts `--path <dir>` (defaults to `./.knogg` or `knogg.toml`).
-
-### `knogg init [--force]`
-
-Create the knogg tree and base files.
+## Typical Workflow
 
 ```bash
-knogg init                 # first time
-knogg init --force         # regenerate (backs up changed files)
-```
-
-### `knogg status`
-
-Print the active context: project, stage, task, status.
-
-```bash
-knogg status
-# Project: knogg
-# Stage:   Stage 8 — Dynamic workflows
-# Task:    OpenCode: agent capabilities + registry (8D)
-# Status:  in_progress
-```
-
-### `knogg doctor`
-
-Diagnose knogg integrity. Reports `[ok]` / `[warn]` / `[error]`, prints `Result: healthy|unhealthy`, exits non-zero on errors.
-
-```bash
-knogg doctor
-```
-
-### `knogg handoff --to <agent> [--print] [--save <file>]`
-
-Render a compact handoff prompt. Injects only `project.name`, `focus.*`, `constraints`, `next_actions`, `handoff.summary` — **never the full knogg**.
-
-- Agents: `cursor`, `claude`, `codex`
-- `--print` and `--save` can be combined
-
-```bash
-knogg handoff --to cursor --print
-knogg handoff --to claude --save .handoff/claude.md
-```
-
-### `knogg sync [--force] [--dry-run]`
-
-Render templates from `plans/tool_registry.yml` to outputs (`.cursorrules`, `.claude/context.md`, `AGENTS.md`).
-
-```bash
-knogg sync --dry-run       # preview
-knogg sync                 # apply
-knogg sync --force         # overwrite human-owned files (with backup)
-```
-
-### `knogg state …`
-
-Edit `state/active_context.yml` safely (lock + atomic write).
-
-```bash
-knogg state set --stage auth --task "Add login" --status in_progress
-knogg state set --status done
-knogg state add-next "Update billing page"
-knogg state clear-next
-```
-
-`--status` must be one of: `todo`, `in_progress`, `blocked`, `done`.
-
-### `knogg decision add`
-
-Append an ADR entry with incremental id (`ADR-0001`, `ADR-0002`, …).
-
-```bash
-knogg decision add \
-  --title "Use staged proposals for agent changes" \
-  --reason "Agents should propose before applying state mutations" \
-  --status accepted
-```
-
-`--status` must be one of: `proposed`, `accepted`, `rejected`, `superseded`.
-
-### `knogg decision set-status`
-
-Update status on existing ADR(s). Accepts multiple ids.
-
-```bash
-knogg decision set-status ADR-0005 ADR-0006 --status accepted
-```
-
-### `knogg proposal …`
-
-Manage staged state-change proposals. Supports multiple ids for show/apply/reject.
-
-```bash
-knogg proposal list                          # PROP-0001  pending  state/active_context.yml
-knogg proposal show PROP-0001 PROP-0002      # multiple ids
-knogg proposal apply PROP-0001 PROP-0002     # best-effort batch — not atomic
-knogg proposal reject PROP-0001              # mark rejected
-knogg proposal gc                            # remove terminal proposals
-knogg proposal gc --status applied --keep 5  # keep latest 5 per status
-```
-
-### `knogg messages …`
-
-Agent message log for structured coordination.
-
-```bash
-knogg messages list                          # all messages
-knogg messages list --from cursor --limit 10 # filtered
-knogg messages list --unread-for opencode    # unread by agent
-knogg messages ack MSG-0001 MSG-0002 --by opencode  # batch ack
-```
-
-### `knogg agents …`
-
-Manage agent workspace configuration (MCP configs per agent).
-
-```bash
-knogg agents list                            # list agents in registry
-knogg agents doctor                          # validate registry
-knogg agents inspect                         # show project agent configs
-knogg agents sync --dry-run                  # preview config changes
-knogg agents set-role cursor builder         # assign role
-knogg agents enable opencode                 # enable agent
-knogg agents disable codex                   # disable agent
-knogg agents enable-mcp cursor knogg         # attach MCP server
-knogg agents disable-mcp cursor knogg        # detach MCP server
-```
-
-### `knogg role …`
-
-Manage agent role specifications.
-
-```bash
-knogg role set builder --summary "Edits Rust code" --responsibility "Implement features"
-knogg role list
-knogg role show builder
-knogg role remove builder
-```
-
-### `knogg hooks …`
-
-Manage event-driven hooks.
-
-```bash
-knogg hooks list                             # list all hooks
-knogg hooks doctor                           # validate hooks
-knogg hooks run after_state_change           # execute hook actions
-knogg hooks enable after_state_change        # enable hook
-knogg hooks disable after_state_change       # disable hook
-```
-
-### `knogg brief …`
-
-Manage the compact project brief.
-
-```bash
-knogg brief refresh                          # regenerate brief
-knogg brief show                             # print brief
-knogg brief doctor                           # validate brief
-```
-
-### `knogg task …`
-
-Manage partitioned tasks from `plans/master_plan.yml`.
-
-```bash
-knogg task list                              # list all tasks
-knogg task claim 7A --agent cursor           # claim a task
-knogg task release 7A --agent cursor         # release (mark done)
-```
-
-### `knogg hub`
-
-Start the Knogg Hub — a TCP router for cross-project agent communication.
-
-```bash
-knogg hub                  # default port 5050
-knogg hub --port 6060      # custom port
-```
-
-The hub routes queries between projects connected via `KNOGG_HUB_URL`.
-
-### `knogg serve`
-
-Start a read-only TCP JSON-RPC server for P2P peering.
-
-```bash
-knogg serve                 # default port 5051
-knogg serve --port 6060     # custom port
-```
-
-Auto-connects to peers declared in `knogg.toml [mesh.peers]`. Supports `query_peer` and `subscribe_to_task` MCP tools.
-
-### `knogg unlock`
-
-Clear stale vault lock files (manual — lock auto-reclaims after 30s).
-
-```bash
-knogg unlock --all                           # clear all lock files
-knogg unlock --file state/active_context.yml  # clear one lock
-```
-
-### `knogg gc`
-
-Reclaim disk space: purge old backups + terminal proposals.
-
-```bash
-knogg gc                    # dry-run by default
-knogg gc --dry-run          # show what would be deleted
-```
-
-### `knogg style …`
-
-Manage coding conventions from `core/style_guides.yml`.
-
-```bash
-knogg style list                             # list style guides
-knogg style show --lang rust                 # show rules for a language
-knogg style doctor                           # check conventions (module docs, fmt)
-```
-
-### `knogg mcp`
-
-Run the MCP server (JSON-RPC over stdio). See [MCP Server](#mcp-server).
-
-### `knogg watch`
-
-Watch `state/active_context.yml` and re-run `sync` on change (300–500 ms debounce).
-
-```bash
-knogg watch
-```
-
-### Command Summary
-
-| Command | Purpose |
-|---------|---------|
-| `knogg init [--force]` | Create / regenerate the knogg tree |
-| `knogg status` | Print project / stage / task / status |
-| `knogg doctor` | Diagnose knogg integrity (exit ≠ 0 on error) |
-| `knogg handoff --to <agent>` | Render a handoff prompt |
-| `knogg sync [--force] [--dry-run]` | Generate tool config files from templates |
-| `knogg state set` | Update the active context |
-| `knogg state add-next` / `clear-next` | Manage next actions |
-| `knogg decision add` / `set-status` | Append ADRs / update ADR status |
-| `knogg proposal list/show/apply/reject/gc` | Manage staged proposals |
-| `knogg messages list` / `ack` | Agent message log |
-| `knogg agents list/sync/set-role/…` | Agent registry management |
-| `knogg role set/list/show/remove` | Role specifications |
-| `knogg hooks list/run/enable/disable` | Event-driven hooks |
-| `knogg brief refresh/show/doctor` | Compact project brief |
-| `knogg task list/claim/release` | Partitioned task management |
-| `knogg hub [--port]` | Start the federation hub for cross-project communication |
-| `knogg serve [--port]` | Start a P2P TCP JSON-RPC server with peer connections |
-| `knogg unlock --all/--file` | Clear stale vault lock files |
-| `knogg gc [--dry-run]` | Reclaim disk space (old backups + terminal proposals) |
-| `knogg style list/show/doctor` | Coding conventions |
-| `knogg mcp` | Run the MCP server (JSON-RPC over stdio) |
-| `knogg watch` | Re-run `sync` when the active context changes |
-
----
-
-## MCP Server
-
-`knogg mcp` speaks **JSON-RPC over stdio** (no HTTP/SSE). One JSON request per line in, one JSON response per line out.
-
-```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"get_active_context","params":{}}' \
-  | ./knogg mcp
-```
-
-### Available Tools
-
-| Tool | Params | Returns |
-|------|--------|---------|
-| `tools/list` | — | List of available tool names |
-| `get_active_context` | `{}` | Resolved `state/active_context.yml` as JSON |
-| `get_brief` | `{}` | Compact project brief |
-| `get_next_actions` | `{}` | Current next actions |
-| `get_allowed_scope` | `{agent?}` | Capability-aware scope for an agent |
-| `read_vault` | `{path}` | A vault YAML file as JSON (path-boundary checked) |
-| `list_vault` | `{include_proposals?}` | Safe relative paths; hides `backups/`, `.lock`, temp files |
-| `search_vault` | `{query}` | Search vault files for text (case-insensitive) |
-| `get_tool_registry` | `{}` | Registry mappings — never template contents |
-| `list_proposals` | `{}` | Staged proposals and their status |
-| `propose_state_update` | `{target, patch, reason}` | Creates a **pending** proposal; does **not** mutate state |
-| `propose_decision` | `{title, reason, scope?, status?}` | Append an ADR entry to the decision log |
-| `audit_commit` | `{id}` | Applies a staged proposal by id (re-audits first) |
-| `post_message` | `{from, text, to?, reply_to?}` | Post a message to the agent message log |
-| `get_messages` | `{from?, to?, limit?, status?, unread_for?}` | Read agent messages with optional filters |
-| `ack_message` | `{id, by}` | Mark a message read/acked |
-| `get_agent_handoff` | `{agent}` | Rendered handoff prompt for an agent |
-| `get_agent_role` | `{agent}` | Role spec assigned to an agent |
-| `set_agent_role` | `{agent, role}` | Assign a role to an agent |
-| `list_roles` | `{}` | List agent roles |
-| `get_role` | `{name}` | Show a role by name |
-| `set_role` | `{name, summary, responsibilities?, constraints?}` | Create or replace a role |
-| `get_current_decisions` | `{}` | Recent decisions from the brief |
-| `get_style_guides` | `{}` | Style guides as JSON |
-
-### Example: Propose a State Change
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"propose_state_update","params":{
-  "target":"state/active_context.yml",
-  "patch":{"focus":{"status":"in_progress"}},
-  "reason":"Move to frontend UI work"}}
-```
-
-The human then applies:
-
-```bash
-knogg proposal list
-knogg proposal apply PROP-0001
-```
-
-### Registering with Agents
-
-Use an **absolute path** to the binary. Build first: `make release` → `./dist/knogg`.
-
-**Cursor** — `.cursor/mcp.json`:
-```json
-{
-  "mcpServers": {
-    "knogg": {
-      "command": "/ABS/PATH/knogg/dist/knogg",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-**Claude Code** — project `.mcp.json`:
-```json
-{
-  "mcpServers": {
-    "knogg": { "command": "/ABS/PATH/knogg/dist/knogg", "args": ["mcp"] }
-  }
-}
-```
-
-**Codex CLI** — `~/.codex/config.toml`:
-```toml
-[mcp_servers.knogg]
-command = "/ABS/PATH/knogg/dist/knogg"
-args = ["mcp"]
-```
-
-> Restart the agent after editing config. Confirm with a `tools/list` call.
-
----
-
-## Workflows
-
-### Human: Start Working on a Task
-
-```bash
-knogg init                                            # once per project
+# Human: set focus
 knogg state set --stage auth --task "Add login" --status in_progress
 knogg state add-next "Wire up session cookie"
-knogg sync                                            # refresh tool config files
-knogg handoff --to cursor --print                     # prompt to paste into Cursor
-```
+knogg sync
+knogg handoff --to cursor --print
 
-### Human: Record a Decision
-
-```bash
+# Human: record a decision
 knogg decision add --title "Use JWT sessions" \
   --reason "Stateless, scales horizontally" --status accepted
-```
 
-### AI Agent: Read Context, Propose a Change
+# AI agent: read context → propose change (via MCP)
+# get_active_context → propose_state_update → PROP-NNNN staged
 
-1. Call `get_active_context` to learn the current focus
-2. Call `list_knogg` / `read_knogg` for more detail
-3. Call `propose_state_update` — this **stages** `PROP-NNNN`, does *not* change state
-
-The human reviews and decides:
-
-```bash
+# Human: review + apply
 knogg proposal show PROP-0001
-knogg proposal apply PROP-0001     # or: reject
-knogg status                       # confirm the change landed
+knogg proposal apply PROP-0001
+knogg status
 ```
-
-### Reactive Sync
-
-```bash
-# Terminal 1
-knogg watch
-# Terminal 2 — any state change triggers `sync` automatically
-knogg state set --status done
-```
-
----
-
-## Knogg Mesh
-
-Mesh enables **cross-project agent communication** — agents in one project can query the vault of another project through a central hub.
-
-### Architecture
-
-```
-Project A (knogg) ──┐
-                    ├──→ Knogg Hub (TCP) ←── Project B (knogg)
-Project C (knogg) ──┘
-```
-
-Each project connects to the hub as a registered peer. Agents use the `query_mesh` MCP tool to read context from other projects.
-
-### Start the Hub
-
-```bash
-knogg hub                  # listen on port 5050
-knogg hub --port 6060      # custom port
-```
-
-Or via Docker:
-
-```bash
-docker compose run --rm -p 5050:5050 dev cargo run -- hub --port 5050
-```
-
-### Connect a Project
-
-Set environment variables before running knogg:
-
-```bash
-export KNOGG_HUB_URL="tcp://localhost:5050"
-export KNOGG_PROJECT="my-project"   # optional — defaults to directory name
-knogg status                        # auto-connects on first command
-```
-
-### Query Another Project
-
-Agents use the `query_mesh` MCP tool:
-
-```json
-{
-  "method": "query_mesh",
-  "params": {
-    "target_project": "other-project",
-    "query": "get_active_context",
-    "args": {}
-  }
-}
-```
-
-Supported queries: `get_active_context`, `read_vault`, `list_vault`, `search_vault`.
-
-### List Connected Peers
-
-```bash
-# Via mesh client (from any connected project)
-knogg mesh list-peers
-```
-
-### Use Cases
-
-- **Multi-repo coordination** — agents working across frontend/backend repos share context
-- **Monorepo sub-projects** — each package has its own `.knogg/` but agents see the full picture
-- **Cross-team visibility** — team A checks team B's active tasks without leaving their project
-
-## P2P Mesh (Direct Peering)
-
-P2P mesh replaces the hub with **direct TCP connections** between vaults. Each vault serves read-only JSON-RPC endpoints and connects to peers declared in `knogg.toml`.
-
-### Architecture
-
-```
-knogg serve --port 5051 ←→ knogg serve --port 5051
-   (frontend)                   (backend)
-        │                           │
-     .knogg/                     .knogg/
-```
-
-Each vault exposes its context via TCP. Peers auto-reconnect on failure.
-
-### Configuration
-
-Add to `knogg.toml`:
-
-```toml
-[mesh]
-listen_port = 5051
-
-[mesh.peers]
-backend = "tcp://localhost:5051"
-db = "tcp://localhost:5052"
-```
-
-### Start a P2P Node
-
-```bash
-# Terminal 1 — serve a vault
-knogg serve --port 5051
-
-# Terminal 2 — serve another vault
-cd /path/to/other-project
-knogg serve --port 5052
-```
-
-### Query a Peer via MCP
-
-Agents use `query_peer` MCP tool:
-
-```json
-{
-  "method": "query_peer",
-  "params": {
-    "peer": "backend",
-    "method": "get_active_context",
-    "params": {}
-  }
-}
-```
-
-### Subscribe to Task Events
-
-Agents subscribe to task-done events from connected peers:
-
-```json
-{
-  "method": "subscribe_to_task",
-  "params": {
-    "peer": "backend",
-    "task_id": "API-Auth",
-    "from": "frontend-agent"
-  }
-}
-```
-
-When the peer marks that task done via `knogg state set --status done`, subscribed frontends receive a `task_done` event and trigger an automatic sync.
-
----
-
-## Vault Maintenance
-
-### `knogg unlock`
-
-Manually clear stale lock files. Useful when a process crashes while holding a lock.
-
-```bash
-# Clear all lock files
-knogg unlock --all
-
-# Clear lock for a specific file
-knogg unlock --file state/active_context.yml
-```
-
-Locks with dead PIDs are auto-reclaimed after 30s — manual unlock is only needed in edge cases.
-
-### `knogg gc`
-
-Reclaim disk space by purging old backups and terminal proposals.
-
-```bash
-knogg gc                      # dry-run by default
-knogg gc --dry-run            # show what would be deleted
-```
-
-Rules:
-- `.knogg/backups/<stamp>/` dirs older than 7 days are removed entirely
-- `.knogg/state/proposals/<id>.yml` with `applied` or `rejected` status are deleted
-
----
-
-## Safety Guarantees
-
-| Guarantee | Implementation |
-|-----------|----------------|
-| **Global lock** | `.knogg/.lock` — RAII, released on drop, 15s timeout, stale-lock auto-reclaim |
-| **Atomic writes** | Temp file + rename — crash never leaves partial file |
-| **Backups** | `init --force` / `sync --force` back up changed files to `.knogg/backups/<timestamp>/` |
-| **Staged proposals** | Agents cannot mutate state directly; changes require human `apply` |
-| **Path boundaries** | `..` always rejected; MCP rejects absolute paths and vault escapes |
-| **Human files respected** | `sync` never overwrites a file without the generated-by marker unless `--force` |
-| **Stale lock reclamation** | Locks with dead PIDs reclaimed after 30s (`libc::kill(pid, 0)` liveness check) |
-
----
-
-## Configuration
-
-### `knogg.toml`
-
-Place in the project root to avoid passing `--path` every time:
-
-```toml
-[knogg]
-path = "./.knogg"
-generated_marker = "<!-- generated-by: knogg -->"
-
-[features]            # accepted but not yet wired into behavior
-clipboard = false
-mcp_stdio = true
-watch = true
-
-[agents]              # informational
-codex_output = "AGENTS.md"
-cursor_output = ".cursorrules"
-claude_output = ".claude/context.md"
-```
-
-### Path Precedence
-
-1. `--path <dir>` CLI flag (highest)
-2. `knogg.toml` → `[knogg].path`
-3. Default `./.knogg`
-
----
-
-## Project Structure
-
-```
-knogg/
-├── src/
-│   ├── main.rs              # CLI entry point
-│   ├── cli.rs               # clap subcommand definitions
-│   ├── mcp/
-│   │   └── mod.rs           # JSON-RPC stdio server (initialize + tools/call + legacy)
-│   ├── commands/
-│   │   ├── agents.rs        # Agent registry, sync, inspect, enable/disable
-│   │   ├── brief.rs         # Brief refresh, show, doctor
-│   │   ├── decision.rs      # ADR log management (add, set-status)
-│   │   ├── doctor.rs        # Integrity diagnostics
-│   │   ├── handoff.rs       # Handoff prompt rendering
-│   │   ├── hooks.rs         # Event-driven hook execution
-│   │   ├── messages.rs      # Agent message log (post, list, ack)
-│   │   ├── plan.rs          # Task claim/release from master_plan.yml
-│   │   ├── proposal.rs      # Stage/apply/reject/gc proposals (variadic ids)
-│   │   ├── roles.rs         # Agent role CRUD
-│   │   ├── scope.rs         # Capability-aware allowed scope
-│   │   ├── state.rs         # Active context mutations
-│   │   ├── style.rs         # Style guide management
-│   │   ├── sync.rs          # Template → output generation
-│   │   └── watch.rs         # File watcher for reactive sync
-│   └── core/
-│       ├── config.rs        # knogg.toml parsing, path resolution
-│       ├── vault.rs         # Vault init, status, agents_md
-│       └── vaultio.rs       # Atomic write, VaultLock, backups
-├── .knogg/                  # Vault (see layout above)
-├── .github/                 # GitHub CI, issue/PR templates
-├── Cargo.toml
-├── docker-compose.yml
-├── Dockerfile.dev
-├── Makefile
-├── LICENSE
-├── CHANGELOG.md
-├── CONTRIBUTING.md
-├── SECURITY.md
-└── README.md
-```
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on development setup, code style, and the PR process.
-
-Quick start:
-
-```bash
-make dev        # enter dev container
-make test       # run tests
-make release    # build binaries
-```
-
----
-
-## Known Limitations
-
-- **MCP transport is stdio only** — no HTTP / SSE / Streamable HTTP
-- **Clipboard is best-effort** — only when the `clipboard` feature is built; otherwise `handoff` falls back to stdout
-- **`[features]` / `[agents]` sections** of `knogg.toml` are parsed but not yet wired into behavior
-- **Decisions** live in a single `state/decision_log.yml` (no per-ADR files yet)
-- **Lock timeout** (5s) may be insufficient for very large vaults under heavy concurrent access
 
 ---
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) and https://www.apache.org/licenses/LICENSE-2.0.
+Apache License 2.0 — see [LICENSE](LICENSE).
