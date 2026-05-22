@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Windows cross-compile target.
-RUN rustup target add x86_64-pc-windows-gnu
+RUN rustup target add x86_64-pc-windows-gnu && \
+    rustup component add rustfmt clippy
 
 CMD ["bash"]
