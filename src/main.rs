@@ -10,6 +10,16 @@ use cli::{AgentsAction, BriefAction, ConfigAction, HooksAction, RoleAction, Styl
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    // Quiet, cached reminder if a newer release exists. Skipped for machine-output
+    // commands (stdout protocols) and for `update` (which checks on its own).
+    if !matches!(
+        cli.command,
+        Commands::Mcp { .. } | Commands::Completions { .. } | Commands::Update { .. }
+    ) {
+        commands::update::passive_notify();
+    }
+
     let cfg = core::config::load()?;
 
     // CLI --path > knogg.toml [knogg].path > default ./.knogg.
@@ -213,6 +223,9 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Gc { path, dry_run } => {
             commands::gc::run(&resolve(path), dry_run)?;
+        }
+        Commands::Update { check } => {
+            commands::update::run(check)?;
         }
         Commands::Style { path, action } => {
             let p = resolve(path);

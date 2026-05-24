@@ -14,6 +14,7 @@ pub mod state;
 pub mod style;
 pub mod sync;
 pub mod unlock;
+pub mod update;
 pub mod gc;
 pub mod migrate;
 pub mod watch;

@@ -186,6 +186,12 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Self-update: check GitHub releases and upgrade to the latest version.
+    Update {
+        /// Only check for a newer version and report it; do not download.
+        #[arg(long)]
+        check: bool,
+    },
     /// Coding conventions from `core/style_guides.yml`.
     Style {
         /// Vault path (overrides knogg.toml; defaults to ./.knogg).
