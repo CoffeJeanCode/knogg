@@ -1,4 +1,4 @@
-# knogg v1.3.0 — MCP-Native Hybrid
+# knogg v1.3.3 — MCP-Native Hybrid
 
 ## Highlights
 
@@ -49,7 +49,7 @@ Old vault YAMLs with missing or wrong-typed fields are patched transparently on 
 ## Installation
 ```bash
 # macOS / Linux (replace VERSION and ARCH as needed)
-curl -fsSL https://github.com/jeanpierre/knogg/releases/download/v1.3.0/knogg-x86_64-unknown-linux-musl.tar.gz | tar xz
+curl -fsSL https://github.com/jeanpierre/knogg/releases/download/v1.3.3/knogg-x86_64-unknown-linux-musl.tar.gz | tar xz
 sudo mv knogg /usr/local/bin/
 
 # Re-link your IDE after upgrading
