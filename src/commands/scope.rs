@@ -10,7 +10,8 @@ use crate::commands::brief;
 use crate::commands::plan;
 use crate::commands::roles;
 
-/// Build MCP/CLI scope payload for an agent (or project-wide if `agent` is None).
+/// Build MCP/CLI scope payload for an agent.
+#[allow(dead_code)]
 pub fn allowed_scope(root: &Path, agent: Option<&str>) -> Result<Value> {
     let brief = brief::load_or_refresh(root)?;
     let mut constraints = brief.constraints.clone();

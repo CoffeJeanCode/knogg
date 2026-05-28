@@ -82,12 +82,9 @@ fn run_action(root: &Path, action: &str) -> Result<()> {
             Ok(())
         }
         "ensure_brief_fresh" => crate::commands::brief::ensure_fresh(root),
-        "sync" => {
-            let path = root
-                .to_str()
-                .ok_or_else(|| anyhow!("non-UTF-8 vault path"))?;
-            crate::commands::sync::sync(path, false, crate::core::vault::MARKER, false)
-        }
+        // "sync" kept as known action for backward compat with existing hooks.yml files;
+        // now refreshes the brief instead of rendering tool configs.
+        "sync" => crate::commands::brief::refresh(root).map(|_| ()),
         other => bail!("unknown hook action '{other}'"),
     }
 }

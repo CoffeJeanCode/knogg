@@ -71,17 +71,10 @@ pub enum Commands {
         #[command(subcommand)]
         action: MessageAction,
     },
-    /// Generate tool-specific config files from templates.
-    Sync {
-        /// Vault path (overrides knogg.toml; defaults to ./.knogg).
-        #[arg(long)]
-        path: Option<String>,
-        /// Overwrite human-owned files.
-        #[arg(long)]
-        force: bool,
-        /// Show what would change without writing anything.
-        #[arg(long)]
-        dry_run: bool,
+    /// Auto-configure the knogg MCP server for a supported IDE.
+    Link {
+        /// Target IDE: cursor or claude.
+        ide: String,
     },
     /// Update the active context state.
     State {
@@ -165,7 +158,7 @@ pub enum Commands {
         #[arg(long, default_value_t = 5051)]
         port: u16,
     },
-    /// Clear vault lock files (Stage 13).
+    /// Clear vault lock files manually.
     Unlock {
         /// Vault path (overrides knogg.toml; defaults to ./.knogg).
         #[arg(long)]
@@ -177,7 +170,7 @@ pub enum Commands {
         #[arg(long)]
         file: Option<String>,
     },
-    /// Reclaim disk space: purge old backups + terminal proposals (Stage 15).
+    /// Reclaim disk space: purge old backups + terminal proposals.
     Gc {
         /// Vault path (overrides knogg.toml; defaults to ./.knogg).
         #[arg(long)]
@@ -204,6 +197,12 @@ pub enum Commands {
     Config {
         #[command(subcommand)]
         action: ConfigAction,
+    },
+    /// Interactively approve or reject pending proposals.
+    Triage {
+        /// Vault path (overrides knogg.toml; defaults to ./.knogg).
+        #[arg(long)]
+        path: Option<String>,
     },
 }
 

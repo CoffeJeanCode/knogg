@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-05-28
+
+### Added
+- **`knogg link <ide>`** — auto-configure the knogg MCP server for Cursor or Claude (writes `.cursor/mcp.json` / `~/.claude.json`)
+- **MCP Resources** — `resources/list` and `resources/read` expose `knogg://core/architecture` and `knogg://state/active_context` as native MCP resources
+- **MCP Prompts** — `prompts/list` and `prompts/get` serve the `knogg-task` prompt with live vault state injected (current focus, next actions, agent-ownership warnings)
+- **FatProposal** — `propose_state_update` now accepts optional `adr_proposal` (inline ADR) and `message_to_human` fields; a single MCP call can atomically stage a state patch, record a decision, and leave a human-readable note
+- **`knogg triage`** — interactive approve/reject loop for pending proposals; applying a proposal with an inline ADR writes the decision log atomically under one vault lock
+- **Schema auto-migration** — `read_yaml_typed<T>` transparently patches old vault YAMLs with missing fields using deep-merge defaults; patched files are written back silently so old vaults require no manual migration
+- `knogg initialize` now advertises `resources` and `prompts` capabilities in the MCP handshake
+
+### Changed
+- `knogg watch` replaces the removed `sync` command with `brief refresh` on state changes
+- Event hooks: `"sync"` action in existing `hooks.yml` files now triggers a brief refresh (backward-compatible)
+- `active_context.yml` `focus` fields (`stage`, `task`, `status`) all have Serde defaults — missing fields no longer cause deserialization failures on old vaults
+- `Focus.owner` field added (optional, skip-serialized when empty) to support agent-ownership tracking in prompts
+
+### Removed
+- `knogg sync` command — replaced by `brief refresh` triggered automatically by `watch` and hooks
+
 ## [1.1.0] — 2026-05-19
 
 ### Added
@@ -39,11 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **query_peer MCP tool** — federated cross-vault queries via P2P pool
 - **subscribe_to_task MCP tool** — subscribe to task-done events from connected peers
 - **Event subscriptions** — `state set --status done` emits task-done events to subscribers
-- **`knogg unlock`** — manually clear stale lock files (global + per-file, Stage 13)
-- **`knogg gc`** — reclaim disk space: purge old backups + terminal proposals (Stage 15)
+- **`knogg unlock`** — manually clear stale lock files (global + per-file)
+- **`knogg gc`** — reclaim disk space: purge old backups + terminal proposals
 - **Stale lock reclamation** — lock files with dead PIDs are auto-reclaimed after 30s timeout
 - **Granular lock metadata** — lock files carry PID, owner, timestamp, intent (JSON)
-- **Schema migrations** — transparent vault YAML upgrades on read (Stage 14)
+- **Schema migrations** — transparent vault YAML upgrades on read
 - Hub service in `docker-compose.yml` with exposed port 5050
 
 ### Changed

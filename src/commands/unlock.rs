@@ -1,4 +1,4 @@
-//! `knogg unlock` — Stage 13. Manually clear granular and global lock files.
+//! `knogg unlock` — Manually clear granular and global lock files.
 
 use std::fs;
 use std::path::Path;

@@ -11,6 +11,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use crate::core::schema::AdrProposal;
 use crate::core::vault::{apply_patch, audit_patch, resolve_path, safe_vault_path};
 use crate::core::vaultio::{atomic_write, today, VaultLock};
 
@@ -45,6 +46,12 @@ pub struct Proposal {
     /// Vault project name when the proposal was created.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub project: String,
+    /// Optional inline ADR bundled with this proposal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adr_proposal: Option<AdrProposal>,
+    /// Optional message to the human reviewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_to_human: Option<String>,
 }
 
 /// Directory holding proposal files.
@@ -176,6 +183,60 @@ pub fn create_with_policy(
         created: today(),
         patch,
         project,
+        adr_proposal: None,
+        message_to_human: None,
+    };
+    write_proposal(root, &prop)?;
+
+    if autoapply_low && risk == ProposalRisk::Low {
+        apply_inner(root, &id)?;
+        return Ok(CreateOutcome {
+            proposal_id: id,
+            status: APPLIED.to_string(),
+            superseded,
+        });
+    }
+    Ok(CreateOutcome {
+        proposal_id: id,
+        status: PENDING.to_string(),
+        superseded,
+    })
+}
+
+/// Stage a FatProposal (patch + optional ADR + optional human message).
+///
+/// Extends `create_with_policy` with optional ADR and reviewer message fields
+/// while keeping the existing function signature unchanged for all callers.
+#[allow(clippy::too_many_arguments)]
+pub fn create_fat_with_policy(
+    root: &Path,
+    target: &str,
+    patch_json: &JsonValue,
+    reason: &str,
+    adr_proposal: Option<AdrProposal>,
+    message_to_human: Option<String>,
+    autoapply_low: bool,
+) -> Result<CreateOutcome> {
+    safe_vault_path(root, target)?;
+    let _lock = VaultLock::acquire(root)?;
+    let superseded = supersede_pending_same_target(root, target)?;
+    let risk = classify_risk(target, patch_json);
+    let id = next_id(root)?;
+    let patch =
+        serde_yaml::to_value(patch_json).map_err(|e| anyhow!("converting patch: {e}"))?;
+    let project = crate::core::vault::read_active_context(root)
+        .map(|c| c.project.name)
+        .unwrap_or_default();
+    let prop = Proposal {
+        id: id.clone(),
+        status: PENDING.to_string(),
+        target: target.to_string(),
+        reason: reason.to_string(),
+        created: today(),
+        patch,
+        project,
+        adr_proposal,
+        message_to_human,
     };
     write_proposal(root, &prop)?;
 

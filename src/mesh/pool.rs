@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-//! Declarative peering — Stage 10.
+//! Declarative peering.
 //!
 //! Static topology declared in `knogg.toml [mesh.peers]`. The pool spawns a
 //! supervisor thread per peer that maintains a live TCP/JSON-RPC connection,

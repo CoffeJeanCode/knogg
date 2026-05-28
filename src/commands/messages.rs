@@ -225,7 +225,8 @@ fn month_days(y: u32) -> [u64; 12] {
     ]
 }
 
-/// Terse message rows for MCP inbox (`id`, `from`, `st`, `tx`).
+/// Terse message rows for MCP inbox (used by Resources and internally).
+#[allow(dead_code)]
 pub fn inbox_terse(root: &Path, agent: Option<&str>) -> Result<Value> {
     expire_stale(root, 30)?;
     let filter = MessageFilter {

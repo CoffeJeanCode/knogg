@@ -80,8 +80,8 @@ fn main() -> anyhow::Result<()> {
                 MessageAction::Ack { ids, by } => commands::messages::cmd_ack(&p, &ids, &by)?,
             }
         }
-        Commands::Sync { path, force, dry_run } => {
-            commands::sync::sync(&resolve(path), force, &marker, dry_run)?;
+        Commands::Link { ide } => {
+            commands::link::link(&ide)?;
         }
         Commands::State { path, action } => {
             let p = resolve(path);
@@ -226,6 +226,9 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Update { check } => {
             commands::update::run(check)?;
+        }
+        Commands::Triage { path } => {
+            commands::triage::triage(&resolve(path))?;
         }
         Commands::Style { path, action } => {
             let p = resolve(path);

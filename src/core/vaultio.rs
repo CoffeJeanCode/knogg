@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 
-/// Wait up to 15s for a held lock (Stage 13).
+/// Wait up to 15s for a held lock.
 pub const LOCK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Polling interval while waiting.

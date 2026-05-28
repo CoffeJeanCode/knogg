@@ -1,4 +1,4 @@
-//! Cross-vault event bus — Stage 12 server side.
+//! Cross-vault event bus.
 //!
 //! When a remote peer sends `subscribe_to_task`, the serve loop registers the
 //! connection's writer half here. On local task completion ([`emit_task_done`])

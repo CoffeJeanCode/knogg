@@ -203,9 +203,19 @@ pub struct Project {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Focus {
+    #[serde(default)]
     pub stage: String,
+    #[serde(default)]
     pub task: String,
+    #[serde(default = "default_status")]
     pub status: String,
+    /// Agent that owns this task; absent in older vaults (Serde default = "").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub owner: String,
+}
+
+fn default_status() -> String {
+    "todo".to_string()
 }
 
 impl Default for Focus {
@@ -214,6 +224,7 @@ impl Default for Focus {
             stage: String::new(),
             task: String::new(),
             status: "todo".to_string(),
+            owner: String::new(),
         }
     }
 }
@@ -519,12 +530,34 @@ pub fn status(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Defaults injected by the auto-migration fallback when `active_context.yml` is
+/// missing required fields (e.g. old vaults, corrupted files, partial writes).
+fn active_context_defaults() -> serde_json::Value {
+    serde_json::json!({
+        "project": {"name": ""},
+        "focus": {
+            "stage": "",
+            "task": "",
+            "status": "todo"
+        },
+        "constraints": [],
+        "next_actions": [],
+        "handoff": {"summary": ""}
+    })
+}
+
 /// Load `state/active_context.yml` from a vault root.
+///
+/// Uses [`migrate::read_yaml_typed`] for transparent auto-migration: if strict
+/// deserialization fails the file is patched with canonical defaults and
+/// written back silently.
 pub fn read_active_context(root: &Path) -> Result<ActiveContext> {
     let file = root.join("state/active_context.yml");
-    let raw = crate::commands::migrate::read_and_migrate(&file)
-        .with_context(|| format!("reading {} (run `knogg init` first?)", file.display()))?;
-    serde_yaml::from_str(&raw).map_err(|e| anyhow!("parsing {}: {e}", file.display()))
+    crate::commands::migrate::read_yaml_typed::<ActiveContext>(
+        &file,
+        &active_context_defaults(),
+    )
+    .with_context(|| format!("reading {} (run `knogg init` first?)", file.display()))
 }
 
 /// Serialize and atomically write the active context. Caller must hold the lock.
@@ -643,6 +676,61 @@ mod tests {
         assert_eq!(ctx.project.name, "knogg");
         assert_eq!(ctx.focus.stage, "Stage 1");
         assert_eq!(ctx.focus.status, "in_progress");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    // ── auto-migration / Serde default coverage ───────────────────────────────
+
+    #[test]
+    fn read_active_context_survives_missing_focus_block() {
+        // Old vault: project present but `focus` key absent entirely.
+        // Fast path succeeds via #[serde(default)] on Focus.
+        let root = temp_root("missing_focus");
+        fs::create_dir_all(root.join("state")).unwrap();
+        let legacy =
+            "project:\n  name: myproject\nnext_actions: []\nconstraints: []\nhandoff:\n  summary: \"\"\n";
+        fs::write(root.join("state/active_context.yml"), legacy).unwrap();
+
+        let ctx = read_active_context(&root).unwrap();
+        assert_eq!(ctx.project.name, "myproject");
+        assert_eq!(ctx.focus.status, "todo"); // default from #[serde(default = "default_status")]
+        assert_eq!(ctx.focus.stage, "");      // default from #[serde(default)]
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn read_active_context_fallback_on_wrong_type() {
+        // Fallback path: `focus` has wrong type → serde_yaml fails → fallback injects defaults.
+        let root = temp_root("wrong_type");
+        fs::create_dir_all(root.join("state")).unwrap();
+        let bad = "project:\n  name: wrongtype\nfocus: \"should be a mapping, not a string\"\nconstraints: []\nnext_actions: []\nhandoff:\n  summary: \"\"\n";
+        fs::write(root.join("state/active_context.yml"), bad).unwrap();
+
+        let ctx = read_active_context(&root).unwrap();
+        assert_eq!(ctx.project.name, "wrongtype");
+        // Defaults injected for the broken focus block.
+        assert_eq!(ctx.focus.status, "todo");
+
+        // File on disk must have been patched (second read also works).
+        let ctx2 = read_active_context(&root).unwrap();
+        assert_eq!(ctx2.project.name, "wrongtype");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn owner_field_absent_in_old_vault_is_empty_string() {
+        // `owner` has #[serde(default)] → absent in YAML → empty string.
+        let root = temp_root("no_owner");
+        fs::create_dir_all(root.join("state")).unwrap();
+        let legacy = concat!(
+            "project:\n  name: knogg\n",
+            "focus:\n  stage: S1\n  task: T\n  status: done\n",
+            "constraints: []\nnext_actions: []\nhandoff:\n  summary: \"\"\n",
+        );
+        fs::write(root.join("state/active_context.yml"), legacy).unwrap();
+
+        let ctx = read_active_context(&root).unwrap();
+        assert_eq!(ctx.focus.owner, "");
         fs::remove_dir_all(&root).ok();
     }
 }

@@ -1,4 +1,4 @@
-//! P2P serve module — Stage 9 + Stage 12 server side.
+//! P2P serve module.
 //!
 //! `knogg serve --port <PORT>` runs a TCP JSON-RPC server exposing the
 //! read-only MCP surface ([`crate::mcp::READ_ONLY_TOOLS`]).

@@ -7,7 +7,6 @@ use std::time::Duration;
 use anyhow::{bail, Result};
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 
-use crate::commands::sync::sync;
 use crate::core::vault::resolve_path;
 
 /// Quiet period before a burst of events triggers a sync (within 300-500ms).
@@ -26,13 +25,12 @@ fn touches_target(paths: &[PathBuf], target: &Path) -> bool {
 /// `knogg watch`: re-run sync whenever `state/active_context.yml` changes.
 ///
 /// `marker` is the generated-by marker (from `knogg.toml`, or the default).
-pub fn watch(path: &str, marker: &str) -> Result<()> {
+pub fn watch(path: &str, _marker: &str) -> Result<()> {
     let root = resolve_path(path)?;
-    // Stage 10: bring declared P2P peers online alongside the watcher.
     if let Ok(cfg) = crate::core::config::load() {
         crate::mesh::init_pool(&cfg.mesh);
     }
-    // Stage 15: hourly background GC inside the daemon.
+    // Hourly background GC inside the daemon.
     crate::commands::gc::spawn_daemon_gc(&root);
     let state_dir = root.join("state");
     let target = state_dir.join(TARGET);
@@ -76,10 +74,9 @@ pub fn watch(path: &str, marker: &str) -> Result<()> {
         }
 
         if relevant {
-            println!("change detected in {TARGET}, syncing...");
-            // sync writes tool configs outside state/, so this cannot loop.
-            if let Err(e) = sync(path, false, marker, false) {
-                eprintln!("sync failed: {e}");
+            println!("change detected in {TARGET}, refreshing brief...");
+            if let Err(e) = crate::commands::brief::refresh(&root) {
+                eprintln!("brief refresh failed: {e}");
             }
         }
     }

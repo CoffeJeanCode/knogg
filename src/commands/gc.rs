@@ -1,4 +1,4 @@
-//! `knogg gc` — Stage 15. Reclaim disk space.
+//! `knogg gc` — Reclaim disk space.
 //!
 //! Rules:
 //! - `.knogg/backups/<stamp>/...` older than 7 days → delete the whole stamp dir

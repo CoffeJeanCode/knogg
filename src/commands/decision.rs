@@ -29,8 +29,8 @@ struct Decision {
     reason: String,
 }
 
-/// Append a new ADR entry; returns its id. Caller need not hold the lock.
-pub fn add_entry(
+/// Append a new ADR entry without acquiring the lock. Caller MUST hold `VaultLock`.
+pub fn add_entry_inner(
     root: &Path,
     title: &str,
     reason: &str,
@@ -43,14 +43,11 @@ pub fn add_entry(
             ALLOWED_DECISION_STATUS.join(", ")
         );
     }
-
-    let _lock = VaultLock::acquire(root)?;
     let file = root.join("state/decision_log.yml");
     let raw = fs::read_to_string(&file)
         .with_context(|| format!("reading {} (run `knogg init`?)", file.display()))?;
     let mut log: DecisionLog = serde_yaml::from_str(&raw)
         .map_err(|e| anyhow!("parsing {}: {e}", file.display()))?;
-
     let id = next_id(&log);
     log.decisions.push(Decision {
         id: id.clone(),
@@ -60,11 +57,22 @@ pub fn add_entry(
         scope: scope.to_string(),
         reason: reason.to_string(),
     });
-
     let out = serde_yaml::to_string(&log)
         .map_err(|e| anyhow!("serializing decision log: {e}"))?;
     atomic_write(&file, out.as_bytes())?;
     Ok(id)
+}
+
+/// Append a new ADR entry; returns its id. Caller need not hold the lock.
+pub fn add_entry(
+    root: &Path,
+    title: &str,
+    reason: &str,
+    status: &str,
+    scope: &str,
+) -> Result<String> {
+    let _lock = VaultLock::acquire(root)?;
+    add_entry_inner(root, title, reason, status, scope)
 }
 
 /// `knogg decision add`: append a new ADR entry (CLI wrapper).

@@ -1,3 +1,6 @@
+pub mod prompts;
+pub mod resources;
+
 use std::fs;
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -70,10 +73,7 @@ fn error_response(id: Value, code: i64, message: &str) -> String {
 }
 
 /// Read-only tool surface exposed to P2P peers — minimal surface only.
-pub const READ_ONLY_TOOLS: &[&str] = &[
-    "get_active_context",
-    "read_vault",
-];
+pub const READ_ONLY_TOOLS: &[&str] = &["read_vault"];
 
 /// Read-only JSON-RPC dispatch for the P2P serve daemon.
 /// Rejects any method that could mutate the vault. Special server-side methods
@@ -113,7 +113,11 @@ pub fn dispatch_line_readonly(root: &Path, line: &str) -> Option<String> {
 fn initialize_result() -> Value {
     json!({
         "protocolVersion": PROTOCOL_VERSION,
-        "capabilities": { "tools": {} },
+        "capabilities": {
+            "tools": {},
+            "resources": {},
+            "prompts": {},
+        },
         "serverInfo": {
             "name": "knogg",
             "version": env!("CARGO_PKG_VERSION"),
@@ -121,18 +125,13 @@ fn initialize_result() -> Value {
     })
 }
 
-/// MCP `tools/list` result: minimal core tool descriptors (ADR-0010 pruned surface).
+/// MCP `tools/list` result: pruned surface (ADR-0010 v2).
 fn tools_list() -> Value {
     let obj = |props: Value, required: Value| {
         json!({"type": "object", "properties": props,
                "required": required, "additionalProperties": false})
     };
     json!({"tools": [
-        {"name": "get_active_context",
-         "description": "Consolidated context: focus, next_actions, decisions, scope, handoff, inbox",
-         "inputSchema": json!({"type": "object",
-            "properties": {"agent": {"type": "string"}},
-            "additionalProperties": false})},
         {"name": "read_vault",
          "description": "Read a vault file; optional 1-based line range",
          "inputSchema": json!({"type": "object",
@@ -144,12 +143,27 @@ fn tools_list() -> Value {
             "required": ["path"],
             "additionalProperties": false})},
         {"name": "propose_state_update",
-         "description": "Stage or auto-apply a state update (risk-tiered, ADR-0011)",
-         "inputSchema": obj(
-            json!({"target": {"type": "string"},
-                   "patch": {"type": "object"},
-                   "reason": {"type": "string"}}),
-            json!(["target", "patch", "reason"]))},
+         "description": "Stage a state update as a FatProposal: patch + optional ADR + optional message to human",
+         "inputSchema": json!({
+             "type": "object",
+             "properties": {
+               "target": {"type": "string"},
+               "patch": {"type": "object"},
+               "reason": {"type": "string"},
+               "adr_proposal": {
+                 "type": "object",
+                 "properties": {
+                   "title": {"type": "string"},
+                   "reason": {"type": "string"}
+                 },
+                 "required": ["title", "reason"],
+                 "additionalProperties": false
+               },
+               "message_to_human": {"type": "string"}
+             },
+             "required": ["target", "patch"],
+             "additionalProperties": false
+         })},
         {"name": "query_peer",
          "description": "Query a peer vault via lazy TCP connection (knogg.toml [mesh.peers])",
          "inputSchema": obj(
@@ -174,19 +188,25 @@ fn tools_list() -> Value {
             },
             "required": ["action"],
             "additionalProperties": false})},
-        {"name": "ack_message",
-         "description": "Acknowledge a message as read by an agent",
-         "inputSchema": obj(
-            json!({"id": {"type": "string"}, "by": {"type": "string"}}),
-            json!(["id", "by"]))},
     ]})
 }
 
-/// Route a JSON-RPC method: MCP handshake methods plus direct tool calls.
+/// Route a JSON-RPC method: MCP handshake, resources, prompts, and tool calls.
 fn handle(root: &Path, method: &str, params: &Value) -> Result<Value> {
     match method {
         "initialize" => Ok(initialize_result()),
         "tools/list" => Ok(tools_list()),
+        "resources/list" => Ok(resources::list_resources()),
+        "resources/read" => {
+            let uri = str_param(params, "uri")?;
+            resources::read_resource(root, uri)
+        }
+        "prompts/list" => Ok(prompts::list_prompts()),
+        "prompts/get" => {
+            let name = str_param(params, "name")?;
+            let args = params.get("arguments").cloned().unwrap_or(json!({}));
+            prompts::get_prompt(root, name, &args)
+        }
         "tools/call" => {
             let name = str_param(params, "name")?;
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
@@ -205,10 +225,9 @@ fn handle(root: &Path, method: &str, params: &Value) -> Result<Value> {
     }
 }
 
-/// Invoke a vault tool by name (core surface: ADR-0010 pruned).
+/// Invoke a vault tool by name (core surface: ADR-0010 v2).
 fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
     match name {
-        "get_active_context" => get_active_context(root, params),
         "read_vault" => {
             let target = str_param(params, "path")?;
             let start = params.get("start_line").and_then(Value::as_u64);
@@ -221,18 +240,25 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
                 .get("patch")
                 .cloned()
                 .ok_or_else(|| anyhow!("missing param 'patch'"))?;
-            let reason = params
-                .get("reason")
+            let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
+
+            let adr_proposal = params
+                .get("adr_proposal")
+                .and_then(|v| serde_json::from_value::<crate::core::schema::AdrProposal>(v.clone()).ok());
+            let message_to_human = params
+                .get("message_to_human")
                 .and_then(Value::as_str)
-                .unwrap_or("");
+                .map(String::from);
 
             let audit = audit_patch(&patch);
             let cfg = crate::core::config::load().unwrap_or_default();
-            let outcome = crate::commands::proposal::create_with_policy(
+            let outcome = crate::commands::proposal::create_fat_with_policy(
                 root,
                 target,
                 &patch,
                 reason,
+                adr_proposal,
+                message_to_human,
                 cfg.proposals.autoapply_low,
             )?;
             if outcome.status == "applied" {
@@ -259,13 +285,7 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
             lazy_query(addr, method, &args)
         }
         "messages" => messages_tool(root, params),
-        "ack_message" => {
-            let id = str_param(params, "id")?;
-            let by = str_param(params, "by")?;
-            crate::commands::messages::ack_many(root, &[id.to_string()], by)?;
-            Ok(json!({"acked": true, "id": id, "by": by}))
-        }
-        // Tools removed from MCP surface — use read_vault or CLI commands instead.
+        // Tools removed from MCP surface — use read_vault, Resources, or CLI commands instead.
         legacy if is_legacy_tool(legacy) => {
             bail!("tool '{legacy}' removed from MCP surface — use read_vault or CLI commands")
         }
@@ -276,7 +296,9 @@ fn call_tool(root: &Path, name: &str, params: &Value) -> Result<Value> {
 fn is_legacy_tool(name: &str) -> bool {
     matches!(
         name,
-        "get_brief"
+        "get_active_context"
+            | "ack_message"
+            | "get_brief"
             | "get_next_actions"
             | "get_current_decisions"
             | "get_allowed_scope"
@@ -300,7 +322,8 @@ fn is_legacy_tool(name: &str) -> bool {
     )
 }
 
-/// Terse consolidated agent context (ADR-0010 / Stage 10B).
+/// Consolidated agent context (used by Resources/Prompts and internally).
+#[allow(dead_code)]
 fn get_active_context(root: &Path, params: &Value) -> Result<Value> {
     let agent = optional_str(params, "agent");
     let brief = crate::commands::brief::load_or_refresh(root)?;
@@ -514,6 +537,128 @@ mod tests {
     use crate::core::vault::init;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    // ---- resources/prompts --------------------------------------------------
+
+    #[test]
+    fn initialize_declares_resources_and_prompts() {
+        let v = initialize_result();
+        assert!(v["capabilities"]["resources"].is_object());
+        assert!(v["capabilities"]["prompts"].is_object());
+    }
+
+    #[test]
+    fn resources_list_via_handle() {
+        let root = PathBuf::from("/tmp/unused");
+        let v = handle(&root, "resources/list", &json!({})).unwrap();
+        let res = v["resources"].as_array().unwrap();
+        assert_eq!(res.len(), 2);
+    }
+
+    #[test]
+    fn resources_read_via_handle() {
+        let root = temp_root("resread");
+        init(root.to_str().unwrap(), false).unwrap();
+        let v = handle(
+            &root,
+            "resources/read",
+            &json!({"uri": "knogg://state/active_context"}),
+        )
+        .unwrap();
+        assert!(v["contents"][0]["text"].as_str().unwrap().contains("project:"));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn prompts_list_via_handle() {
+        let root = PathBuf::from("/tmp/unused");
+        let v = handle(&root, "prompts/list", &json!({})).unwrap();
+        let names: Vec<&str> = v["prompts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"knogg-task"));
+    }
+
+    #[test]
+    fn prompts_get_knogg_task_via_handle() {
+        let root = temp_root("promptget");
+        init(root.to_str().unwrap(), false).unwrap();
+        let v = handle(
+            &root,
+            "prompts/get",
+            &json!({"name": "knogg-task", "arguments": {"agent": "cursor"}}),
+        )
+        .unwrap();
+        let text = v["messages"][0]["content"]["text"].as_str().unwrap();
+        assert!(text.contains("SISTEMA KNOGG"));
+        assert!(text.contains("Tarea Actual"));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    // ---- FatProposal --------------------------------------------------------
+
+    #[test]
+    fn fat_proposal_stores_adr_and_message() {
+        let root = temp_root("fat");
+        init(root.to_str().unwrap(), false).unwrap();
+        let v = handle(
+            &root,
+            "propose_state_update",
+            &json!({
+                "target": "state/active_context.yml",
+                "patch": {"focus": {"status": "done"}},
+                "reason": "task complete",
+                "adr_proposal": {"title": "Use FatProposal", "reason": "atomic transactions"},
+                "message_to_human": "All done, please review."
+            }),
+        )
+        .unwrap();
+        let id = v["proposal_id"].as_str().unwrap();
+        let prop = crate::commands::proposal::load(&root, id).unwrap();
+        assert!(prop.adr_proposal.is_some());
+        assert_eq!(prop.adr_proposal.as_ref().unwrap().title, "Use FatProposal");
+        assert_eq!(prop.message_to_human.as_deref(), Some("All done, please review."));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn fat_proposal_without_optional_fields_roundtrips() {
+        let root = temp_root("fat_min");
+        init(root.to_str().unwrap(), false).unwrap();
+        let v = handle(
+            &root,
+            "propose_state_update",
+            &json!({
+                "target": "state/active_context.yml",
+                "patch": {"focus": {"status": "in_progress"}}
+            }),
+        )
+        .unwrap();
+        let id = v["proposal_id"].as_str().unwrap();
+        let prop = crate::commands::proposal::load(&root, id).unwrap();
+        assert!(prop.adr_proposal.is_none());
+        assert!(prop.message_to_human.is_none());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn old_proposal_yaml_loads_without_fat_fields() {
+        let root = temp_root("fat_compat");
+        init(root.to_str().unwrap(), false).unwrap();
+        // Simulate a legacy YAML without fat proposal fields.
+        let dir = root.join("state/proposals");
+        fs::create_dir_all(&dir).unwrap();
+        let legacy = "id: PROP-0001\nstatus: pending\ntarget: state/active_context.yml\nreason: old\ncreated: 2024-01-01\npatch:\n  focus:\n    status: done\n";
+        fs::write(dir.join("PROP-0001.yml"), legacy).unwrap();
+        let prop = crate::commands::proposal::load(&root, "PROP-0001").unwrap();
+        assert!(prop.adr_proposal.is_none());
+        assert!(prop.message_to_human.is_none());
+        assert_eq!(prop.status, "pending");
+        fs::remove_dir_all(&root).ok();
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -575,12 +720,22 @@ mod tests {
     }
 
     #[test]
-    fn get_active_context_returns_resolved_context() {
+    fn get_active_context_underlying_fn_intact() {
         let root = temp_root("getctx");
         init(root.to_str().unwrap(), false).unwrap();
-        let v = handle(&root, "get_active_context", &json!({})).unwrap();
+        // Tool removed from MCP surface; underlying function stays callable.
+        let v = get_active_context(&root, &json!({})).unwrap();
         assert_eq!(v["pj"], "knogg");
         assert!(v["nx"].is_array());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn get_active_context_mcp_returns_legacy_error() {
+        let root = temp_root("getctx_legacy");
+        init(root.to_str().unwrap(), false).unwrap();
+        let v = handle(&root, "get_active_context", &json!({}));
+        assert!(v.is_err());
         fs::remove_dir_all(&root).ok();
     }
 
@@ -684,13 +839,14 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names.len(), 6);
-        assert!(names.contains(&"get_active_context"));
+        assert_eq!(names.len(), 4);
         assert!(names.contains(&"read_vault"));
         assert!(names.contains(&"propose_state_update"));
         assert!(names.contains(&"query_peer"));
         assert!(names.contains(&"messages"));
-        assert!(names.contains(&"ack_message"));
+        // Not exposed on the MCP surface:
+        assert!(!names.contains(&"get_active_context"));
+        assert!(!names.contains(&"ack_message"));
     }
 
     #[test]
@@ -700,13 +856,13 @@ mod tests {
         let v = handle(
             &root,
             "tools/call",
-            &json!({"name": "get_active_context", "arguments": {}}),
+            &json!({"name": "read_vault", "arguments": {"path": "state/active_context.yml"}}),
         )
         .unwrap();
         assert_eq!(v["isError"], false);
         let text = v["content"][0]["text"].as_str().unwrap();
         let parsed: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(parsed["pj"], "knogg");
+        assert_eq!(parsed["project"]["name"], "knogg");
         fs::remove_dir_all(&root).ok();
     }
 
@@ -726,8 +882,6 @@ mod tests {
     fn direct_methods_still_work() {
         let root = temp_root("direct");
         init(root.to_str().unwrap(), false).unwrap();
-        let ctx = handle(&root, "get_active_context", &json!({})).unwrap();
-        assert_eq!(ctx["pj"], "knogg");
         let rv = handle(
             &root,
             "read_vault",
